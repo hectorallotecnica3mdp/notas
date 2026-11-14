@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mi curso</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b2430;--mu:#6b7686;--bd:#e1e5ea;--ac:#2a62d9;--ok:#1f9d55;--no:#d64545;--wa:#d9890f;--ted:#8e44ad;color-scheme:light}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14181e;--card:#1d232c;--tx:#e8ecf1;--mu:#93a0b1;--bd:#2c3542;--ac:#6b95f0;--ok:#43c27a;--no:#f07070;--wa:#e9a73e;--ted:#b07bd1;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+#app{max-width:1200px;margin:0 auto;padding:12px}
+h1{font-size:19px;margin:0}h2{font-size:16px;margin:14px 0 8px}
+header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+button,select,input,textarea{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:9px;padding:8px 11px}
+button{cursor:pointer;background:var(--ac);color:#fff;border:0;font-weight:600}
+button.ghost{background:var(--card);color:var(--tx);border:1px solid var(--bd)}
+button.danger{background:var(--no)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:10px;padding-bottom:2px}
+.tabs button{background:var(--card);color:var(--mu);border:1px solid var(--bd);white-space:nowrap;font-weight:500}
+.tabs button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:11px;margin-bottom:9px}
+.muted{color:var(--mu);font-size:13px}
+.wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%}
+th,td{padding:5px 7px;border-bottom:1px solid var(--bd);text-align:center;font-size:13px}
+th{font-size:12px;font-weight:600;vertical-align:bottom;background:var(--card);position:sticky;top:0;z-index:1}
+th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:var(--card);z-index:2;min-width:160px;font-weight:500}
+.cell{width:28px;min-width:28px;height:26px;border:0;background:transparent;text-align:center;font-weight:600;cursor:pointer;border-radius:5px;padding:0;font-size:12px}
+.cell.P{background:var(--ok);color:#fff}.cell.A{background:var(--no);color:#fff}.cell.T{background:var(--wa);color:#fff}
+.cell.X{background:var(--ok);color:#fff}.cell.O{background:var(--wa);color:#fff}
+.chip{display:inline-block;padding:1px 7px;border-radius:9px;font-size:12px;background:var(--bd);color:var(--mu)}
+.chip.ok{background:var(--ok);color:#fff}.chip.no{background:var(--no);color:#fff}.chip.wa{background:var(--wa);color:#fff}
+.rot{writing-mode:vertical-rl;transform:rotate(180deg);max-height:140px;margin:0 auto;font-weight:500;font-size:11px}
+.num{width:44px;min-width:44px;border:1px solid transparent;background:transparent;text-align:center;font-weight:600;padding:4px 2px;border-radius:5px;font-size:12px;transition:background .15s,color .15s}
+.num:focus{outline:2px solid var(--ac);background:var(--card)}
+.num.okk{color:var(--ok);background:rgba(31,157,85,.16)}
+.num.bad{color:var(--no);background:rgba(214,69,69,.16)}
+.num.tea{color:var(--ok);background:rgba(31,157,85,.22);font-weight:700}
+.num.tep{color:var(--wa);background:rgba(217,137,15,.22);font-weight:700}
+.num.ted{color:var(--ted);background:rgba(142,68,173,.18);font-weight:700}
+.num.aus{color:var(--mu);background:rgba(107,118,134,.12);font-style:italic}
+.fecha{width:100%;max-width:110px;font-size:10px;padding:2px 4px;border-radius:5px;border:1px solid var(--bd);background:transparent;color:var(--mu)}
+.fot{display:inline-block;padding:2px 6px;border-radius:7px;background:rgba(217,137,15,.18);color:var(--wa);font-size:11px;font-weight:700;cursor:pointer;min-width:34px;user-select:none}
+.fot:hover{background:rgba(217,137,15,.32)}
+.celdaNota{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:64px}
+.legend{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:4px 12px;font-size:12px;margin-top:6px}
+.legend div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grp{background:var(--bd);font-weight:600}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:9px;background:var(--bd);font-size:12px;margin:2px}
+.pill.ok{background:rgba(31,157,85,.18);color:var(--ok)}.pill.no{background:rgba(214,69,69,.15);color:var(--no)}
+#toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:var(--tx);color:var(--bg);padding:8px 14px;border-radius:20px;display:none;font-size:13px;z-index:99}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:14px;z-index:100}
+#modal.on{display:flex}
+#modal .box{background:var(--card);border-radius:14px;padding:14px;max-width:720px;width:100%;max-height:88vh;overflow:auto;position:relative;padding-top:36px}
+#modal .x{position:absolute;top:8px;right:10px;background:transparent;border:0;color:var(--mu);font-size:22px;font-weight:700;cursor:pointer;padding:4px 8px;border-radius:8px}
+#modal .x:hover{background:var(--bd);color:var(--tx)}
+#modal textarea{width:100%;min-height:140px;font-family:ui-monospace,monospace;font-size:12px}
+.mini{font-size:12px;padding:4px 8px}
+.hero{text-align:center;padding:30px 14px}
+.hero .big{font-size:22px;font-weight:700;margin-bottom:8px}
+.hero .btn-file{display:inline-block;background:var(--ac);color:#fff;padding:12px 22px;border-radius:12px;font-weight:700;cursor:pointer;margin-top:10px}
+.hero input[type=file]{display:none}
+.pl-btn{width:40px;height:36px;border:1px solid var(--bd);background:var(--card);color:var(--mu);border-radius:7px;font-weight:700;font-size:14px;cursor:pointer;padding:0}
+.pl-btn.P{background:var(--ok);color:#fff;border-color:var(--ok)}
+.pl-btn.A{background:var(--no);color:#fff;border-color:var(--no)}
+.pl-btn.T{background:var(--wa);color:#fff;border-color:var(--wa)}
+#menuBtn{background:var(--card);color:var(--tx);border:1px solid var(--bd)}
+#menu{position:absolute;top:calc(100% + 6px);right:0;background:var(--card);border:1px solid var(--bd);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.18);min-width:260px;padding:6px;z-index:50;display:none}
+#menu.on{display:block}
+#menu .sec{padding:6px 10px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--mu);margin-top:4px}
+#menu button{display:flex;gap:8px;align-items:center;width:100%;text-align:left;background:transparent;color:var(--tx);border:0;border-radius:8px;padding:9px 10px;font-weight:500;cursor:pointer}
+#menu button:hover{background:var(--bd)}
+#menu .sep{height:1px;background:var(--bd);margin:4px 0}
+header .menuWrap{position:relative}
+@media print{.tabs,header,button,.noprint{display:none!important}.wrap{overflow:visible}}
+</style></head><body>
+<div id="app"></div>
+<div id="toast"></div>
+<div id="modal" onclick="if(event.target===this)closeModal()"><div class="box"><button class="x" onclick="closeModal()" title="Cerrar">✕</button><div id="modalBox"></div></div></div>
+<script>
+console.log('Mi curso v6.4 (fecha por nota + fotocopias)');
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+const KEY='micurso-v6';
+const uid=()=>Math.random().toString(36).slice(2,9);
+const td=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+const fd=d=>d?d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4).slice(2):'';
+const fc=c=>c?c.slice(0,4)+'-'+c.slice(4):'';
+let D=null,cur=0,tab='asist',edit=false,timer;
+let HIST=[];
+const C=()=>D.cursos[cur];
+const catArr=()=>Object.values(D.circuitos||{}).sort((a,b)=>a.nro-b.nro);
+const APROB=7;
+const parseNum=v=>{if(v==null||v==='')return null;const s=String(v).replace(',','.').trim();if(/^-?\d+(\.\d+)?$/.test(s))return parseFloat(s);return null};
+const notaDe=v=>{if(v&&typeof v==='object')return v.v;return v};
+const fechaDe=v=>{if(v&&typeof v==='object')return v.f||'';return''};
+const gcls=v=>{
+ const n=parseNum(notaDe(v));
+ if(n!=null)return n<APROB?'bad':'okk';
+ const u=String(notaDe(v)||'').toUpperCase();
+ return {TEA:'tea',TEP:'tep',TED:'ted',A:'aus',X:'aus','-':'aus','XX':'aus','NE':'aus'}[u]||'';
+};
+
+function statsAsist(c,s){try{let p=0,a=0,t=0;const asis=c.asistencia||{};for(const f in asis){const v=asis[f][s.id];if(!v)continue;if(v==='P')p++;else if(v==='A')a++;else t++}const n=p+a+t;return{n,p,a,t,pc:n?Math.round((p+t)/n*100):null}}catch(e){return{n:0,p:0,a:0,t:0,pc:null}}}
+const usaCirc=c=>c.usaCirc!==undefined?!!c.usaCirc:Object.keys(c.circuitosHechos||{}).length>0;
+function circHechos(c,id){return (c.circuitosHechos||{})[id]||[]}
+function temasDe(c){try{return [...new Set((c.evaluaciones||[]).map(e=>e.tema))]}catch(e){return[]}}
+function mejorTema(c,id,tema){try{const evs=(c.evaluaciones||[]).filter(e=>e.tema===tema);let best=null;evs.forEach(e=>{const n=parseNum(notaDe(((c.notas||{})[id]||{})[e.id]));if(n!=null&&(best==null||n>best))best=n});return best}catch(e){return null}}
+function ultimaInstanciaTema(c,id,tema){try{const evs=(c.evaluaciones||[]).filter(e=>e.tema===tema);let ult=null;evs.forEach(e=>{const v=notaDe(((c.notas||{})[id]||{})[e.id]);if(v!=null&&v!=='')ult=v});return ult}catch(e){return null}}
+function temaAprobado(c,id,tema){
+ const evs=(c.evaluaciones||[]).filter(e=>e.tema===tema);
+ let ult=null,best=null,hayTEP=false,hayNumBaja=false;
+ evs.forEach(e=>{const v=notaDe(((c.notas||{})[id]||{})[e.id]);if(v==null||v==='')return;ult=v;
+  const n=parseNum(v);
+  if(n!=null){if(best==null||n>best)best=n;if(n<APROB)hayNumBaja=true}
+  else{const u=String(v).toUpperCase();if(u==='TEP')hayTEP=true}
+ });
+ if(ult==null)return false;
+ if(String(ult).toUpperCase()==='TEA')return true;
+ if(hayTEP||hayNumBaja)return false;
+ if(best!=null&&best>=APROB)return true;
+ return false;
+}
+function temasPend(c,id){return temasEvaluados(c).filter(t=>!temaAprobado(c,id,t))}
+
+function matSel(c){if(!c.materias||!c.materias.length)return null;const id=c._matSel||c.materias[0].id;return c.materias.find(x=>x.id===id)||c.materias[0]}
+function temasDeMateria(m){try{return [...new Set((m.evaluaciones||[]).map(e=>e.tema))]}catch(e){return[]}}
+function mejorTemaMateria(c,id,m,tema){try{const evs=(m.evaluaciones||[]).filter(e=>e.tema===tema);let best=null;evs.forEach(e=>{const n=parseNum(notaDe(((c.notas||{})[id]||{})[e.id]));if(n!=null&&(best==null||n>best))best=n});return best}catch(e){return null}}
+function temaAprobadoMateria(c,id,m,tema){
+ const evs=(m.evaluaciones||[]).filter(e=>e.tema===tema);
+ let ult=null,best=null,hayTEP=false,hayNumBaja=false;
+ evs.forEach(e=>{const v=notaDe(((c.notas||{})[id]||{})[e.id]);if(v==null||v==='')return;ult=v;
+  const n=parseNum(v);
+  if(n!=null){if(best==null||n>best)best=n;if(n<APROB)hayNumBaja=true}
+  else{const u=String(v).toUpperCase();if(u==='TEP')hayTEP=true}
+ });
+ if(ult==null)return false;
+ if(String(ult).toUpperCase()==='TEA')return true;
+ if(hayTEP||hayNumBaja)return false;
+ if(best!=null&&best>=APROB)return true;
+ return false;
+}
+function temasPendMateria(c,id,m){return temasDeMateria(m).filter(t=>!temaAprobadoMateria(c,id,m,t))}
+
+function cierreFinal(c,id){
+ try{
+  const cc=(c&&c.cierres&&c.cierres[id])||{};
+  const nums=[];let bajo=false,tep=false,tea=false;
+  ['1er','2do','3ro','4to'].forEach(k=>{const v=cc[k];if(v==null||v==='')return;const n=parseNum(v);if(n!=null){nums.push(n);if(n<APROB)bajo=true}else{const u=String(v).toUpperCase();if(u==='TEA')tea=true;if(u==='TEP')tep=true}});
+  const prom=nums.length?nums.reduce((a,b)=>a+b,0)/nums.length:null;
+  let estado='';
+  if(nums.length===0&&!tea&&!tep)estado='Sin datos';
+  else if(bajo||tep)estado='A recuperar';
+  else if(prom!=null&&prom<APROB)estado='A recuperar';
+  else if(prom!=null||tea)estado='Aprobado';
+  return{prom:prom!=null?Math.round(prom*10)/10:null,estado};
+ }catch(e){return{prom:null,estado:'Sin datos'}}
+}
+function cierreFinalMateria(c,id,m){
+ try{
+  const cc=(c.cierres||{})[id]||{};
+  const nums=[];let bajo=false,tep=false,tea=false;
+  ['1er','2do','3ro','4to'].forEach(k=>{const v=cc[m.id+'_'+k];if(v==null||v==='')return;const n=parseNum(v);if(n!=null){nums.push(n);if(n<APROB)bajo=true}else{const u=String(v).toUpperCase();if(u==='TEA')tea=true;if(u==='TEP')tep=true}});
+  const prom=nums.length?nums.reduce((a,b)=>a+b,0)/nums.length:null;
+  let estado='';
+  if(nums.length===0&&!tea&&!tep)estado='Sin datos';
+  else if(bajo||tep)estado='A recuperar';
+  else if(prom!=null&&prom<APROB)estado='A recuperar';
+  else if(prom!=null||tea)estado='Aprobado';
+  return{prom:prom!=null?Math.round(prom*10)/10:null,estado};
+ }catch(e){return{prom:null,estado:'Sin datos'}}
+}
+const chipE=e=>e==='Aprobado'
+ ?'<span class="chip ok" style="font-size:13px;padding:3px 10px">Aprobado</span>'
+ : e==='A recuperar'
+  ?'<span class="chip no" style="font-size:13px;padding:3px 10px">A recuperar</span>'
+  :'<span class="chip" style="font-size:13px;padding:3px 10px">Sin datos</span>';
+
+function tipoTxt(c,e){const t=String(e.tipo==null?'':e.tipo).trim();if(!t||t==='Original')return'';
+ if(/^\d+(\.0)?$/.test(t)){const g=(c.evaluaciones||[]).filter(x=>x.tema===e.tema),i=g.indexOf(e);return['Evaluación','Recuperatorio','Recup. final'][i]||('Instancia '+(i+1))}return t}
+const evLabel=(c,e)=>e.tema+(tipoTxt(c,e)?' · '+tipoTxt(c,e):'');
+function temasEvaluados(c){return temasDe(c).filter(t=>(c.alumnos||[]).some(s=>mejorTema(c,s.id,t)!=null||ultimaInstanciaTema(c,s.id,t)!=null))}
+
+function bannerBackup(){let t=null;try{t=localStorage.getItem('micurso-backup')}catch(e){}
+ const dias=t?Math.floor((Date.now()-new Date(t))/864e5):null;if(dias!==null&&dias<7)return'';
+ return`<div class=card style="border-color:var(--wa);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><span>💾 ${dias===null?'Todavía no descargaste ninguna copia de seguridad.':'Hace '+dias+' días que no descargás una copia de seguridad.'} Tus datos viven solo en este navegador.</span><button class=mini onclick="expJSON()">Descargar copia ahora</button></div>`}
+
+function load(){try{const s=localStorage.getItem(KEY);if(s)return JSON.parse(s);const old=localStorage.getItem('micurso-v5');if(old)return JSON.parse(old)}catch(e){}return null}
+function save(){clearTimeout(timer);timer=setTimeout(()=>{try{localStorage.setItem(KEY,JSON.stringify(D))}catch(e){toast('No se pudo guardar')}programarSync()},250)}
+function pushH(){HIST.push(JSON.stringify(D)+'§'+cur);if(HIST.length>40)HIST.shift()}
+function undo(){if(!HIST.length){toast('Nada para deshacer');return}const s=HIST.pop(),i=s.lastIndexOf('§');D=JSON.parse(s.slice(0,i));cur=parseInt(s.slice(i+1))||0;if(cur>=D.cursos.length)cur=0;save();render();toast('Deshecho')}
+function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',2600)}
+function setTab(k){tab=k;render()}
+window.setTab=setTab;
+function toggleEdit(){edit=!edit;clearTimeout(window._e);if(edit)window._e=setTimeout(()=>{edit=false;render()},10*60000);render();toast(edit?'✏️ Edición activada':'🔒 Modo ver')}
+window.toggleEdit=toggleEdit;
+function abrirMenu(e){if(e){e.preventDefault();e.stopPropagation()}const m=$('#menu');if(m)m.classList.toggle('on')}
+window.abrirMenu=abrirMenu;
+function closeMenu(){const m=$('#menu');if(m)m.classList.remove('on')}
+window.closeMenu=closeMenu;
+document.addEventListener('click',e=>{const m=$('#menu');if(!m||!m.classList.contains('on'))return;const w=m.closest('.menuWrap');if(w&&!w.contains(e.target))m.classList.remove('on')});
+
+function render(){
+ const app=$('#app');
+ try{
+  if(!D){app.innerHTML=`<div class=hero><div class=big>🎓 Mi curso</div><p class=muted>Cargá el archivo de datos para empezar.</p><label class=btn-file>📂 Cargar datos-2026.json<input type=file accept=".json" onchange="loadJSON(this)"></label><p class=muted style="margin-top:20px">o <a href="#" onclick="blank();return false">empezar vacío</a></p><p class=muted>¿Ya usás la nube? <a href="#" onclick="openNube();return false">☁️ Conectar y restaurar mis datos</a></p></div>`;return}
+  const c=C();
+  if(!c){app.innerHTML='<div class=card><b>No hay cursos.</b><p class=muted>Creá uno nuevo o recuperá el último con Deshacer.</p><div class=row><button onclick="nuevoAnio()">➕ Crear curso</button><button class=ghost onclick="undo()">↶ Deshacer</button><button class=ghost onclick="openImportJSON()">📂 Cargar JSON</button></div></div>';return}
+  let h=`<header><h1>🎓 Mi curso</h1><div class=row>
+   ${D.cursos.length?`<select onchange="cur=+this.value;render()">${D.cursos.map((x,i)=>`<option value=${i} ${i==cur?'selected':''}>${esc(x.nombre)} (${x.anio})</option>`).join('')}</select>`:''}
+   <button class=ghost onclick="toggleEdit()">${edit?'✏️ Editando':'🔒 Ver'}</button>
+   <button class=ghost onclick="openNube()" title="Nube">${nubeOK()?'☁️ '+(nubeEstado||'Conectada'):'☁️ Nube'}</button>
+   <div class=menuWrap style="position:relative">
+    <button id=menuBtn onclick="abrirMenu(event)" title="Menú">⚙️</button>
+    <div id=menu>
+     <div class=sec>Datos</div>
+     <button onclick="closeMenu();expJSON()">⬇ Exportar JSON</button>
+     <button onclick="closeMenu();openImportXlsx()">📥 Importar Excel</button>
+     <button onclick="closeMenu();openImportJSON()">📂 Cargar JSON</button>
+     <button onclick="closeMenu();nuevoAnio()">📅 Nuevo curso / año</button>
+     <div class=sep></div>
+     <div class=sec>Publicación</div>
+     <button onclick="closeMenu();publicarPadres()">📤 Publicar para padres</button>
+    </div>
+   </div>
+   <button class=ghost onclick="undo()" title="Deshacer último cambio">↶</button>
+  </div></header>`;
+  h+=bannerBackup();
+  h+=`<div class=tabs>${[['asist','Asistencia'],['circ','Circuitos'],['eval','Evaluaciones'],['cie','Cierres'],['obs','Observaciones'],['alum','Alumnos'],['rep','Reportes'],['pad','Padres']].map(([k,l])=>`<button class="${tab==k?'on':''}" onclick="setTab('${k}')">${l}</button>`).join('')}</div>`;
+  h+=`<div class=muted style="margin-bottom:6px">${esc(c.materia||'')}${c.docente?' · '+esc(c.docente):''} · ${(c.alumnos||[]).length} alumnos · ${c.anio||''}${c.materias&&c.materias.length?' · '+c.materias.map(m=>esc(m.nombre)).join(' / '):''}</div>`;
+  let fn=null;
+  if(tab==='asist')fn=vAsist;else if(tab==='circ')fn=vCirc;else if(tab==='eval')fn=vEval;else if(tab==='cie')fn=vCie;else if(tab==='alum')fn=vAlum;else if(tab==='rep')fn=vRep;else if(tab==='pad')fn=vPad;else if(tab==='obs')fn=vObs;
+  if(!fn){tab='asist';fn=vAsist;}
+  let body='';
+  try{body=fn(c)}catch(e){console.error('Error en pestaña '+tab,e);body='<div class=card style="border-color:var(--no)"><b style="color:var(--no)">Error en esta pestaña</b><div class=muted>'+esc(e&&e.message||String(e))+'</div></div>'}
+  h+=body;app.innerHTML=h;
+ }catch(e){console.error('Error general de render',e);app.innerHTML='<div class=card style="border-color:var(--no)"><b style="color:var(--no)">Error al dibujar la app</b><div class=muted>'+esc(e&&e.message||String(e))+'</div></div>'}
+}
+
+// Asistencia
+let asisFiltro='';
+function vAsist(c){
+ const fechas=Object.keys(c.asistencia||{}).sort();
+ const total=(c.alumnos||[]).length;
+ let h=`<div class=card><div class=row style="justify-content:space-between;margin-bottom:8px"><b>Asistencia</b><span class=muted>${fechas.length} clases · ${total} alumnos</span></div><div class=row style="margin-bottom:8px"><input type=date id=asisFecha value="${asisFiltro||td()}" onchange="asisFiltro=this.value;render()"><button class=ghost onclick="asisFiltro='';render()">Ir a hoy</button><button onclick="nuevaClase()">➕ Nueva clase</button><button onclick="pasarListaHoy()">📅 Pasar lista de hoy</button><button class=ghost onclick="abrirCompletar()">📆 Completar semanas</button>${edit?'<span class="chip no">✏️ Edición activa</span>':'<span class=chip>🔒 Ver</span>'}</div></div>`;
+ h+='<div class="card wrap"><table><thead><tr><th>Alumno</th>';
+ fechas.forEach(f=>{const esSel=f===asisFiltro?'style="background:var(--ac);color:#fff"':'';h+=`<th ${esSel}><div class=rot>${fd(f)}</div>${edit?`<a href="#" onclick="delFecha('${f}');return false" title="Borrar" style="color:var(--no);text-decoration:none;font-size:10px">✕</a>`:''}</th>`});
+ h+='<th>%</th><th>P</th><th>A</th><th>T</th></tr></thead><tbody>';
+ (c.alumnos||[]).forEach(s=>{const st=statsAsist(c,s);h+=`<tr><td>${esc(s.nombre)}</td>`;fechas.forEach(f=>{const v=((c.asistencia||{})[f]||{})[s.id]||'';h+=`<td><button class="cell ${v}" onclick="setA('${f}','${s.id}')">${v||'·'}</button></td>`});h+=`<td><span class="chip ${st.pc<75?'no':st.pc<85?'wa':'ok'}">${st.pc??'-'}%</span></td><td>${st.p}</td><td>${st.a}</td><td>${st.t}</td></tr>`});
+ h+='</tbody></table></div>';return h;
+}
+function setA(f,id){if(!edit){toast('Activá edición');return}pushH();const c=C();c.asistencia=c.asistencia||{};c.asistencia[f]=c.asistencia[f]||{};const o=['','P','A','T'];const cur=c.asistencia[f][id]||'';c.asistencia[f][id]=o[(o.indexOf(cur)+1)%4];if(!c.asistencia[f][id])delete c.asistencia[f][id];save();render()}
+function nuevaClase(){if(!edit){toast('Activá edición');return}const f=(asisFiltro||($('#asisFecha')&&$('#asisFecha').value)||td()).slice(0,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(f)){toast('Fecha inválida');return}const c=C();c.asistencia=c.asistencia||{};if(c.asistencia[f]){toast('Esa fecha ya existe');asisFiltro=f;render();return}pushH();c.asistencia[f]={};asisFiltro=f;save();render();toast('Clase '+fd(f)+' agregada')}
+function delFecha(f){if(!edit){toast('Activá edición');return}if(!confirm('¿Borrar la clase del '+fd(f)+' y sus marcas?'))return;pushH();delete C().asistencia[f];if(asisFiltro===f)asisFiltro='';save();render()}
+function pasarListaHoy(){if(!edit){toast('Activá edición');return}const f=td();const c=C();c.asistencia=c.asistencia||{};if(!c.asistencia[f]){pushH();c.asistencia[f]={}}asisFiltro=f;const alumnos=(c.alumnos||[]).slice();const day=c.asistencia[f]||{};let html=`<h2>Pasar lista — ${fd(f)}</h2><p class=muted>Marcá P / A / T por alumno.</p><div class=row style="margin-bottom:8px"><button class=ghost onclick="marcarTodos('P')">Todos P</button><button class=ghost onclick="marcarTodos('A')">Todos A</button><button class=ghost onclick="marcarTodos('T')">Todos T</button><button class=ghost onclick="limpiarDia()">Limpiar</button></div><div style="max-height:60vh;overflow:auto">`;alumnos.forEach(s=>{const v=day[s.id]||'';html+=`<div class="pl-row" data-id="${s.id}" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--bd)"><span style="flex:1;padding-right:8px">${esc(s.nombre)}</span><span class=row style="gap:4px"><button class="pl-btn ${v==='P'?'P':''}" data-v="P" onclick="markPL('${s.id}','P')">P</button><button class="pl-btn ${v==='A'?'A':''}" data-v="A" onclick="markPL('${s.id}','A')">A</button><button class="pl-btn ${v==='T'?'T':''}" data-v="T" onclick="markPL('${s.id}','T')">T</button></span></div>`});html+=`</div><div class=row style="margin-top:10px"><button onclick="closeModal();render()">Guardar y cerrar</button><button class=ghost onclick="closeModal();render()">Cancelar</button></div>`;$('#modalBox').innerHTML=html;$('#modal').classList.add('on')}
+function markPL(id,val){const f=td();const c=C();c.asistencia=c.asistencia||{};c.asistencia[f]=c.asistencia[f]||{};if(c.asistencia[f][id]===val)delete c.asistencia[f][id];else c.asistencia[f][id]=val;save();const row=document.querySelector(`.pl-row[data-id="${id}"]`);if(row){const actual=c.asistencia[f][id]||'';row.querySelectorAll('.pl-btn').forEach(b=>b.classList.toggle(b.dataset.v,b.dataset.v===actual))}}
+function marcarTodos(v){const f=td();const c=C();c.asistencia=c.asistencia||{};c.asistencia[f]=c.asistencia[f]||{};(c.alumnos||[]).forEach(s=>{if(v===''||v==null)delete c.asistencia[f][s.id];else c.asistencia[f][s.id]=v});save();document.querySelectorAll('.pl-row').forEach(row=>{const id=row.dataset.id;const actual=c.asistencia[f][id]||'';row.querySelectorAll('.pl-btn').forEach(b=>b.classList.toggle(b.dataset.v,b.dataset.v===actual))})}
+function limpiarDia(){marcarTodos('')}
+function abrirCompletar(){if(!edit){toast('Activá edición');return}const c=C();const fechas=Object.keys(c.asistencia||{}).sort();const ult=fechas[fechas.length-1]||td();$('#modalBox').innerHTML=`<h2>Completar semanas</h2><p class=muted>Agrega todas las fechas que falten entre el rango.</p><div class=row style="margin:8px 0"><label>Desde <input type=date id=desde value="${ult}"></label><label>Hasta <input type=date id=hasta value="2026-12-30"></label><label>Cada <input type=number id=paso value=7 min=1 max=30 style="width:60px"> días</label></div><div class=row><button onclick="doCompletar()">Agregar faltantes</button><button class=ghost onclick="closeModal()">Cancelar</button></div><div id=compPv class=muted style="margin-top:8px"></div>`;$('#modal').classList.add('on')}
+function doCompletar(){const c=C();c.asistencia=c.asistencia||{};const desde=$('#desde').value,hasta=$('#hasta').value,paso=parseInt($('#paso').value)||7;if(!/^\d{4}-\d{2}-\d{2}$/.test(desde)||!/^\d{4}-\d{2}-\d{2}$/.test(hasta)){toast('Fechas inválidas');return}if(desde>hasta){toast('Rango invertido');return}let d=new Date(desde+'T12:00:00');const fin=new Date(hasta+'T12:00:00');const nuevas=[];let guard=0;while(d<=fin&&guard<400){const s=d.toISOString().slice(0,10);if(!c.asistencia[s])nuevas.push(s);d.setDate(d.getDate()+paso);guard++}if(!nuevas.length){$('#compPv').textContent='No hay fechas faltantes.';return}if(!confirm('Agregar '+nuevas.length+' fechas nuevas?'))return;pushH();nuevas.forEach(s=>c.asistencia[s]={});save();closeModal();render();toast('Agregadas '+nuevas.length+' clases')}
+
+// Circuitos
+function vCirc(c){
+ if(!catArr().length)return '<div class=card>No hay catálogo de circuitos.</div>';
+ if(!usaCirc(c))return '<div class=card><b>Circuitos</b><p class=muted>Este curso no tiene circuitos cargados.</p></div>';
+ const cats=catArr();let h=`<div class=card><div class=row style="justify-content:space-between;margin-bottom:6px"><b>Circuitos</b><span class=muted>click en X para marcar/desmarcar.</span></div>${edit?`<div class=row><button class=ghost onclick="intercambiar25y26()">🔁 Intercambiar 25↔26 (MEA)</button></div>`:''}</div>`;
+ h+='<div class="card wrap"><table><thead><tr><th>Alumno</th>';cats.forEach(x=>h+=`<th title="${esc(x.nombre)}"><div class=rot>${x.nro} — ${esc(x.nombre)}</div></th>`);h+='<th>Hechos</th></tr></thead><tbody>';
+ (c.alumnos||[]).forEach(s=>{const he=new Set(circHechos(c,s.id));h+=`<tr><td>${esc(s.nombre)}</td>`;cats.forEach(x=>{const id='c'+String(x.nro).padStart(2,'0');const v=he.has(id);h+=`<td><button class="cell ${v?'X':''}" onclick="tgC('${s.id}','${id}')">${v?'X':'·'}</button></td>`});h+=`<td><b>${he.size}</b>/${cats.length}</td></tr>`});
+ h+='</tbody></table></div>';h+=`<div class=card><b>Leyenda</b><div class=legend>${cats.map(x=>`<div><b>${x.nro}</b> — ${esc(x.nombre)}</div>`).join('')}</div></div>`;return h;
+}
+function tgC(id,cidv){if(!edit){toast('Activá edición');return}const c=C();const al=(c.alumnos||[]).find(x=>x.id===id);const cat=D.circuitos?D.circuitos[cidv]:null;const nombreCi=cat?cat.nro+' — '+cat.nombre:cidv;const hechos=(c.circuitosHechos&&c.circuitosHechos[id])?c.circuitosHechos[id]:[];const yaEsta=hechos.includes(cidv);if(!confirm('¿'+(yaEsta?'Desmarcar':'Marcar')+' "'+nombreCi+'" para '+al.nombre+'?'))return;pushH();c.circuitosHechos=c.circuitosHechos||{};c.circuitosHechos[id]=c.circuitosHechos[id]||[];const i=c.circuitosHechos[id].indexOf(cidv);if(i>=0)c.circuitosHechos[id].splice(i,1);else c.circuitosHechos[id].push(cidv);save();render()}
+function intercambiar25y26(){if(!edit){toast('Activá edición');return}if(!confirm('¿Intercambiar los circuitos 25 y 26 en TODOS los cursos?'))return;let cambiados=0;D.cursos.forEach(c=>{if(!c.circuitosHechos)return;Object.keys(c.circuitosHechos).forEach(alId=>{const arr=c.circuitosHechos[alId]||[];const tiene25=arr.includes('c25');const tiene26=arr.includes('c26');if(tiene25===tiene26)return;if(tiene25)c.circuitosHechos[alId]=arr.filter(x=>x!=='c25').concat('c26');else c.circuitosHechos[alId]=arr.filter(x=>x!=='c26').concat('c25');cambiados++})});if(!cambiados){toast('No había 25/26 para intercambiar');return}pushH();save();render();toast('Intercambiados 25↔26 en '+cambiados+' alumnos')}
