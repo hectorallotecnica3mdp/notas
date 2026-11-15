@@ -78,6 +78,7 @@ header .menuWrap{position:relative}
 <div id="app"></div>
 <div id="toast"></div>
 <div id="modal" onclick="if(event.target===this)closeModal()"><div class="box"><button class="x" onclick="closeModal()" title="Cerrar">✕</button><div id="modalBox"></div></div></div>
+<script src="supabase-config.js"></script>
 <script>
 console.log('Mi curso v6.4 (fecha por nota + fotocopias)');
 const $=s=>document.querySelector(s);
@@ -90,6 +91,11 @@ const fc=c=>c?c.slice(0,4)+'-'+c.slice(4):'';
 let D=null,cur=0,tab='asist',edit=false,timer;
 let HIST=[];
 const C=()=>D.cursos[cur];
+const SB_CONFIG=window.MICURSO_SUPABASE_CONFIG||{};
+const SUPABASE_MODE=!!(SB_CONFIG.url||SB_CONFIG.anonKey);
+let sb=null,sbUser=null,sbAdmin=false,sbAuthLoading=SUPABASE_MODE,sbAuthError='',sbAccess={},sbVersions=new Map(),sbOriginalCourses=new Map(),sbOriginalSettings='',sbDirty=new Set(),sbDeleted=new Set(),sbSyncTimer=null,sbSyncBusy=false,sbSyncError='',sbImportData=null,sbAccessRows=[];
+const esAdmin=()=>SUPABASE_MODE&&sbAdmin;
+const puedeEditarCurso=(c)=>{if(!SUPABASE_MODE)return true;const course=c||(D?C():null);return esAdmin()||!!(course&&sbAccess[course.id]==='edit')};
 const catArr=()=>Object.values(D.circuitos||{}).sort((a,b)=>a.nro-b.nro);
 const APROB=7;
 const parseNum=v=>{if(v==null||v==='')return null;const s=String(v).replace(',','.').trim();if(/^-?\d+(\.\d+)?$/.test(s))return parseFloat(s);return null};
@@ -190,13 +196,96 @@ function bannerBackup(){let t=null;try{t=localStorage.getItem('micurso-backup')}
  return`<div class=card style="border-color:var(--wa);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><span>💾 ${dias===null?'Todavía no descargaste ninguna copia de seguridad.':'Hace '+dias+' días que no descargás una copia de seguridad.'} Tus datos viven solo en este navegador.</span><button class=mini onclick="expJSON()">Descargar copia ahora</button></div>`}
 
 function load(){try{const s=localStorage.getItem(KEY);if(s)return JSON.parse(s);const old=localStorage.getItem('micurso-v5');if(old)return JSON.parse(old)}catch(e){}return null}
-function save(){clearTimeout(timer);timer=setTimeout(()=>{try{localStorage.setItem(KEY,JSON.stringify(D))}catch(e){toast('No se pudo guardar')}programarSync()},250)}
+function sbSettings(){const out={};Object.keys(D||{}).forEach(k=>{if(k!=='cursos'&&k!=='v')out[k]=D[k]});return out}
+async function cargarSupabase(){
+ const [courses,access,settings,admin]=await Promise.all([
+  sb.from('course_records').select('id,name,course_data,updated_at'),
+  sb.from('course_access').select('email,course_id,access_level'),
+  sb.from('app_settings').select('id,settings').eq('id','global').maybeSingle(),
+  sb.rpc('is_app_admin')
+ ]);
+ for(const r of [courses,access,settings,admin])if(r.error)throw new Error(r.error.message);
+ sbAdmin=admin.data===true;
+ sbAccess={};(access.data||[]).forEach(x=>{sbAccess[x.course_id]=x.access_level});
+ sbVersions=new Map();sbOriginalCourses=new Map();
+ const cursos=(courses.data||[]).map(r=>{const c=r.course_data;if(!c||typeof c!=='object'||Array.isArray(c))throw new Error('Un curso guardado tiene un formato inválido');sbVersions.set(r.id,r.updated_at);sbOriginalCourses.set(r.id,JSON.stringify(c));return c});
+ D=Object.assign({v:6,cursos:[]},settings.data&&settings.data.settings||{},{cursos});
+ sbOriginalSettings=JSON.stringify(sbSettings());sbDirty.clear();sbDeleted.clear();sbSyncError='';edit=false;cur=Math.min(cur,Math.max(0,cursos.length-1));
+}
+async function abrirSesionSupabase(user){
+ if(user&&sbUser&&user.id===sbUser.id&&D&&!sbAuthError)return;
+ sbAuthLoading=true;sbAuthError='';sbUser=user;edit=false;render();
+ if(!user){clearTimeout(sbSyncTimer);D=null;sbAdmin=false;sbAccess={};sbVersions.clear();sbOriginalCourses.clear();sbDirty.clear();sbDeleted.clear();HIST=[];sbAuthLoading=false;render();return}
+ D=null;HIST=[];
+ try{await cargarSupabase();sbAuthLoading=false;render()}
+ catch(e){D=null;sbAuthError='No se pudieron cargar los cursos: '+e.message;sbAuthLoading=false;render()}
+}
+async function iniciarSupabase(){
+ if(!SUPABASE_MODE){D=load();render();return}
+ if(!SB_CONFIG.url||!SB_CONFIG.anonKey){sbAuthError='Falta configurar la URL o la clave pública de Supabase.';sbAuthLoading=false;render();return}
+ if(!window.supabase){
+  await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';s.onload=resolve;s.onerror=()=>reject(new Error('No se pudo cargar Supabase JS'));document.head.appendChild(s)});
+ }
+ if(!window.supabase||!window.supabase.createClient){sbAuthError='No se pudo cargar el servicio de acceso. Revisá la conexión a Internet.';sbAuthLoading=false;render();return}
+ sb=window.supabase.createClient(SB_CONFIG.url,SB_CONFIG.anonKey);
+ const {data,error}=await sb.auth.getSession();
+ if(error){sbAuthError='No se pudo comprobar la sesión: '+error.message;sbAuthLoading=false;render();return}
+ await abrirSesionSupabase(data.session&&data.session.user||null);
+ sb.auth.onAuthStateChange((_event,session)=>{setTimeout(()=>abrirSesionSupabase(session&&session.user||null),0)});
+}
+async function entrarConGoogle(){if(!sb)return;const {error}=await sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:window.location.origin+window.location.pathname}});if(error){sbAuthError='No se pudo iniciar sesión: '+error.message;render()}}
+async function salirSupabase(){if(!sb)return;clearTimeout(sbSyncTimer);await syncSupabaseCambios();if(sbSyncError){toast('No cerré la sesión porque hay cambios sin guardar: '+sbSyncError);return}const {error}=await sb.auth.signOut();if(error)toast('No se pudo cerrar sesión: '+error.message)}
+async function syncSupabaseCambios(){
+ if(!SUPABASE_MODE||!sb||!sbUser||!D)return;
+ if(sbSyncBusy){await new Promise(resolve=>setTimeout(resolve,100));return syncSupabaseCambios()}
+ sbSyncBusy=true;let failed=false;
+ try{
+  for(const id of [...sbDeleted]){
+   sbDeleted.delete(id);const version=sbVersions.get(id);
+   let q=sb.from('course_records').delete().eq('id',id);if(version)q=q.eq('updated_at',version);
+   const {data,error}=await q.select('id').maybeSingle();if(error||!data){sbDeleted.add(id);throw new Error(error&&error.message||'El curso cambió o no tenés permiso para eliminarlo.')}
+   sbVersions.delete(id);sbOriginalCourses.delete(id);
+  }
+  for(const c of D.cursos||[]){
+   const snapshot=JSON.stringify(c);if(sbOriginalCourses.get(c.id)===snapshot)continue;
+   sbDirty.delete(c.id);
+   const payload={id:c.id,name:c.nombre||c.id,course_data:c,updated_by:sbUser.id};
+   const version=sbVersions.get(c.id);
+   let result;
+   if(version)result=await sb.from('course_records').update(payload).eq('id',c.id).eq('updated_at',version).select('updated_at').maybeSingle();
+   else result=await sb.from('course_records').insert(payload).select('updated_at').maybeSingle();
+   if(result.error||!result.data){sbDirty.add(c.id);throw new Error(result.error&&result.error.message||'El curso cambió en otro dispositivo o no tenés permiso para editarlo. Recargá para ver la versión actual.')}
+   sbVersions.set(c.id,result.data.updated_at);sbOriginalCourses.set(c.id,snapshot);
+  }
+  const settings=JSON.stringify(sbSettings());
+  if(settings!==sbOriginalSettings){
+   const {error}=await sb.from('app_settings').upsert({id:'global',settings:sbSettings()});
+   if(error)throw new Error('No se pudieron guardar los ajustes compartidos: '+error.message);
+   sbOriginalSettings=settings;
+  }
+  sbSyncError='';
+ }catch(e){failed=true;sbSyncError=e.message;console.error('Error al guardar en Supabase',e);toast('No se pudo guardar en la nube: '+e.message)}
+ finally{sbSyncBusy=false;if(!failed&&(sbDirty.size||sbDeleted.size||D&&JSON.stringify(sbSettings())!==sbOriginalSettings)){clearTimeout(sbSyncTimer);sbSyncTimer=setTimeout(syncSupabaseCambios,500)}}
+}
+function save(){
+ clearTimeout(timer);
+ if(SUPABASE_MODE){
+  if(!sbUser||!D)return;
+  const current=new Set((D.cursos||[]).map(c=>c.id));
+  sbDeleted.forEach(id=>{if(current.has(id))sbDeleted.delete(id)});
+  sbOriginalCourses.forEach((_snapshot,id)=>{if(!current.has(id))sbDeleted.add(id)});
+  sbDirty.clear();
+  (D.cursos||[]).forEach(c=>{if(sbOriginalCourses.get(c.id)!==JSON.stringify(c))sbDirty.add(c.id)});
+  clearTimeout(sbSyncTimer);sbSyncTimer=setTimeout(syncSupabaseCambios,450);return;
+ }
+ timer=setTimeout(()=>{try{localStorage.setItem(KEY,JSON.stringify(D))}catch(e){toast('No se pudo guardar')}programarSync()},250)
+}
 function pushH(){HIST.push(JSON.stringify(D)+'§'+cur);if(HIST.length>40)HIST.shift()}
 function undo(){if(!HIST.length){toast('Nada para deshacer');return}const s=HIST.pop(),i=s.lastIndexOf('§');D=JSON.parse(s.slice(0,i));cur=parseInt(s.slice(i+1))||0;if(cur>=D.cursos.length)cur=0;save();render();toast('Deshecho')}
 function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(t._t);t._t=setTimeout(()=>t.style.display='none',2600)}
 function setTab(k){tab=k;render()}
 window.setTab=setTab;
-function toggleEdit(){edit=!edit;clearTimeout(window._e);if(edit)window._e=setTimeout(()=>{edit=false;render()},10*60000);render();toast(edit?'✏️ Edición activada':'🔒 Modo ver')}
+function toggleEdit(){if(!puedeEditarCurso()){toast('Tu cuenta tiene acceso de solo lectura a este curso');return}edit=!edit;clearTimeout(window._e);if(edit)window._e=setTimeout(()=>{edit=false;render()},10*60000);render();toast(edit?'✏️ Edición activada':'🔒 Modo ver')}
 window.toggleEdit=toggleEdit;
 function abrirMenu(e){
  if(e){e.preventDefault();e.stopPropagation()}
@@ -220,30 +309,36 @@ window.addEventListener('resize',closeMenu);
 function render(){
  const app=$('#app');
  try{
+  if(SUPABASE_MODE){
+   if(sbAuthLoading){app.innerHTML='<div class=hero><div class=big>🎓 Mi curso</div><p class=muted>Comprobando acceso seguro…</p></div>';return}
+   if(!sbUser){app.innerHTML=`<div class=hero><div class=big>🎓 Mi curso</div><p class=muted>Ingresá con la cuenta Google autorizada para ver tus cursos.</p>${sbAuthError?`<p class="muted" style="color:var(--no)">${esc(sbAuthError)}</p>`:''}${sb?'<button onclick="entrarConGoogle()">Continuar con Google</button>':''}</div>`;return}
+   if(!D){app.innerHTML=`<div class=hero><div class=big>🎓 Mi curso</div><p class=muted>${esc(sbAuthError||'No se pudieron cargar los cursos asignados.')}</p><div class=row style="justify-content:center"><button class=ghost onclick="abrirSesionSupabase(sbUser)">Reintentar</button><button class=ghost onclick="salirSupabase()">Cerrar sesión</button></div></div>`;return}
+  }
   if(!D){app.innerHTML=`<div class=hero><div class=big>🎓 Mi curso</div><p class=muted>Cargá el archivo de datos para empezar.</p><label class=btn-file>📂 Cargar datos-2026.json<input type=file accept=".json" onchange="loadJSON(this)"></label><p class=muted style="margin-top:20px">o <a href="#" onclick="blank();return false">empezar vacío</a></p><p class=muted>¿Ya usás la nube? <a href="#" onclick="openNube();return false">☁️ Conectar y restaurar mis datos</a></p></div>`;return}
-  let migrado=false;(D.cursos||[]).forEach(c=>{if(normalizarFotocopias(c))migrado=true});if(migrado)save();
+  let migrado=false;(D.cursos||[]).forEach(c=>{if((!SUPABASE_MODE||puedeEditarCurso(c))&&normalizarFotocopias(c))migrado=true});if(migrado)save();
   const c=C();
-  if(!c){app.innerHTML='<div class=card><b>No hay cursos.</b><p class=muted>Creá uno nuevo o recuperá el último con Deshacer.</p><div class=row><button onclick="nuevoAnio()">➕ Crear curso</button><button class=ghost onclick="undo()">↶ Deshacer</button><button class=ghost onclick="openImportJSON()">📂 Cargar JSON</button></div></div>';return}
+  if(!c){app.innerHTML=SUPABASE_MODE?`<div class=card><b>${esAdmin()?'Todavía no hay cursos en la base segura.':'No tenés cursos asignados.'}</b><p class=muted>${esAdmin()?'Importá una copia JSON desde un dispositivo con los datos actuales.':'Pedile al administrador que te asigne acceso a uno o más cursos.'}</p><div class=row>${esAdmin()?'<button onclick="abrirImportacionSupabase()">📂 Importar cursos</button><button class=ghost onclick="adminAccesos()">👥 Asignar docentes</button>':''}<button class=ghost onclick="salirSupabase()">Cerrar sesión</button></div></div>`:'<div class=card><b>No hay cursos.</b><p class=muted>Creá uno nuevo o recuperá el último con Deshacer.</p><div class=row><button onclick="nuevoAnio()">➕ Crear curso</button><button class=ghost onclick="undo()">↶ Deshacer</button><button class=ghost onclick="openImportJSON()">📂 Cargar JSON</button></div></div>';return}
   let h=`<header><h1>🎓 Mi curso</h1><div class=row>
-   ${D.cursos.length?`<select onchange="cur=+this.value;render()">${D.cursos.map((x,i)=>`<option value=${i} ${i==cur?'selected':''}>${esc(x.nombre)} (${x.anio})</option>`).join('')}</select>`:''}
-   <button class=ghost onclick="toggleEdit()">${edit?'✏️ Editando':'🔒 Ver'}</button>
-   <button class=ghost onclick="openNube()" title="Nube">${nubeOK()?'☁️ '+(nubeEstado||'Conectada'):'☁️ Nube'}</button>
+   ${D.cursos.length?`<select onchange="cur=+this.value;if(!puedeEditarCurso())edit=false;render()">${D.cursos.map((x,i)=>`<option value=${i} ${i==cur?'selected':''}>${esc(x.nombre)} (${x.anio})</option>`).join('')}</select>`:''}
+   <button class=ghost onclick="toggleEdit()" ${puedeEditarCurso()?'':'disabled'}>${edit?'✏️ Editando':(SUPABASE_MODE&&!puedeEditarCurso()?'🔒 Solo lectura':'🔒 Ver')}</button>
+   ${SUPABASE_MODE?`<span class=chip>${esc(sbUser.email||'Sesión Google')}</span><button class=ghost onclick="salirSupabase()">Salir</button>`:`<button class=ghost onclick="openNube()" title="Nube">${nubeOK()?'☁️ '+(nubeEstado||'Conectada'):'☁️ Nube'}</button>`}
+   ${SUPABASE_MODE&&esAdmin()?'<button class=ghost onclick="adminAccesos()">👥 Accesos</button>':''}
    <div class=menuWrap style="position:relative">
     <button id=menuBtn onclick="abrirMenu(event)" title="Menú">⚙️</button>
     <div id=menu>
      <div class=sec>Datos</div>
      <button onclick="closeMenu();expJSON()">⬇ Exportar JSON</button>
-     <button onclick="closeMenu();openImportXlsx()">📥 Importar Excel</button>
-     <button onclick="closeMenu();openImportJSON()">📂 Cargar JSON</button>
-     <button onclick="closeMenu();nuevoAnio()">📅 Nuevo curso / año</button>
+     ${!SUPABASE_MODE||puedeEditarCurso()?'<button onclick="closeMenu();openImportXlsx()">📥 Importar Excel</button>':''}
+     ${SUPABASE_MODE&&esAdmin()?'<button onclick="closeMenu();abrirImportacionSupabase()">📂 Importar cursos a la nube</button>':(!SUPABASE_MODE?'<button onclick="closeMenu();openImportJSON()">📂 Cargar JSON</button>':'')}
+     ${!SUPABASE_MODE||esAdmin()?'<button onclick="closeMenu();nuevoAnio()">📅 Nuevo curso / año</button>':''}
      <div class=sep></div>
      <div class=sec>Publicación</div>
-     <button onclick="closeMenu();publicarPadres()">📤 Publicar para padres</button>
+     ${!SUPABASE_MODE||esAdmin()?'<button onclick="closeMenu();publicarPadres()">📤 Publicar para padres</button>':''}
     </div>
    </div>
    <button class=ghost onclick="undo()" title="Deshacer último cambio">↶</button>
   </div></header>`;
-  h+=bannerBackup();
+  if(!SUPABASE_MODE)h+=bannerBackup();
   h+=`<div class=tabs>${[['asist','Asistencia'],['circ','Circuitos'],['eval','Evaluaciones'],['cie','Cierres'],['obs','Observaciones'],['alum','Alumnos'],['rep','Reportes'],['pad','Padres']].map(([k,l])=>`<button class="${tab==k?'on':''}" onclick="setTab('${k}')">${l}</button>`).join('')}</div>`;
   h+=`<div class=muted style="margin-bottom:6px">${esc(c.materia||'')}${c.docente?' · '+esc(c.docente):''} · ${(c.alumnos||[]).length} alumnos · ${c.anio||''}${c.materias&&c.materias.length?' · '+c.materias.map(m=>esc(m.nombre)).join(' / '):''}</div>`;
   let fn=null;
@@ -288,7 +383,7 @@ function vCirc(c){
  h+='</tbody></table></div>';h+=`<div class=card><b>Leyenda</b><div class=legend>${cats.map(x=>`<div><b>${x.nro}</b> — ${esc(x.nombre)}</div>`).join('')}</div></div>`;return h;
 }
 function tgC(id,cidv){if(!edit){toast('Activá edición');return}const c=C();const al=(c.alumnos||[]).find(x=>x.id===id);const cat=D.circuitos?D.circuitos[cidv]:null;const nombreCi=cat?cat.nro+' — '+cat.nombre:cidv;const hechos=(c.circuitosHechos&&c.circuitosHechos[id])?c.circuitosHechos[id]:[];const yaEsta=hechos.includes(cidv);if(!confirm('¿'+(yaEsta?'Desmarcar':'Marcar')+' "'+nombreCi+'" para '+al.nombre+'?'))return;pushH();c.circuitosHechos=c.circuitosHechos||{};c.circuitosHechos[id]=c.circuitosHechos[id]||[];const i=c.circuitosHechos[id].indexOf(cidv);if(i>=0)c.circuitosHechos[id].splice(i,1);else c.circuitosHechos[id].push(cidv);save();render()}
-function intercambiar25y26(){if(!edit){toast('Activá edición');return}if(!confirm('¿Intercambiar los circuitos 25 y 26 en TODOS los cursos?'))return;let cambiados=0;D.cursos.forEach(c=>{if(!c.circuitosHechos)return;Object.keys(c.circuitosHechos).forEach(alId=>{const arr=c.circuitosHechos[alId]||[];const tiene25=arr.includes('c25');const tiene26=arr.includes('c26');if(tiene25===tiene26)return;if(tiene25)c.circuitosHechos[alId]=arr.filter(x=>x!=='c25').concat('c26');else c.circuitosHechos[alId]=arr.filter(x=>x!=='c26').concat('c25');cambiados++})});if(!cambiados){toast('No había 25/26 para intercambiar');return}pushH();save();render();toast('Intercambiados 25↔26 en '+cambiados+' alumnos')}
+function intercambiar25y26(){if(!edit){toast('Activá edición');return}if(SUPABASE_MODE&&!esAdmin()){toast('Solo el administrador puede modificar circuitos globales');return}if(!confirm('¿Intercambiar los circuitos 25 y 26 en TODOS los cursos?'))return;let cambiados=0;D.cursos.forEach(c=>{if(!c.circuitosHechos)return;Object.keys(c.circuitosHechos).forEach(alId=>{const arr=c.circuitosHechos[alId]||[];const tiene25=arr.includes('c25');const tiene26=arr.includes('c26');if(tiene25===tiene26)return;if(tiene25)c.circuitosHechos[alId]=arr.filter(x=>x!=='c25').concat('c26');else c.circuitosHechos[alId]=arr.filter(x=>x!=='c26').concat('c25');cambiados++})});if(!cambiados){toast('No había 25/26 para intercambiar');return}pushH();save();render();toast('Intercambiados 25↔26 en '+cambiados+' alumnos')}
 
 // Evaluaciones (con fecha por nota y un contador de fotocopias por tema)
 function celdaN(id,eid,notaObj,conFecha,edit2){
@@ -457,7 +552,7 @@ function vAlum(c){
  return h;
 }
 function delAl(id){if(!edit){toast('Activá edición');return}const c=C();const al=(c.alumnos||[]).find(x=>x.id===id);if(!al)return;if(!confirm('¿Quitar a '+al.nombre+' de este curso?'))return;pushH();c.alumnos=(c.alumnos||[]).filter(x=>x.id!==id);if(c.circuitosHechos)delete c.circuitosHechos[id];if(c.notas)delete c.notas[id];if(c.cierres)delete c.cierres[id];if(c.practicasHechas)delete c.practicasHechas[id];if(c.obs)delete c.obs[id];if(c.fotocopias)delete c.fotocopias[id];if(c.noEntregoLaminas)delete c.noEntregoLaminas[id];Object.keys(c.asistencia||{}).forEach(f=>{if(c.asistencia[f])delete c.asistencia[f][id]});save();render();toast(al.nombre+' quitado')}
-function eliminarCurso(){if(!edit){toast('Activá edición');return}const c=C();if(!c)return;if(!confirm('¿Eliminar este curso con todos sus datos? Se puede deshacer con ↶.'))return;pushH();D.cursos.splice(cur,1);cur=Math.max(0,Math.min(cur,D.cursos.length-1));tab='asist';save();render();toast('Curso eliminado')}
+function eliminarCurso(){if(!edit){toast('Activá edición');return}if(SUPABASE_MODE&&!esAdmin()){toast('Solo el administrador puede eliminar cursos');return}const c=C();if(!c)return;if(!confirm('¿Eliminar este curso con todos sus datos? Se puede deshacer con ↶.'))return;pushH();D.cursos.splice(cur,1);cur=Math.max(0,Math.min(cur,D.cursos.length-1));tab='asist';save();render();toast('Curso eliminado')}
 function agregarLista(){if(!edit){toast('Activá edición');return}const c=C(),nombres=listaDesdeTexto(document.getElementById('alLista').value);if(!nombres.length){toast('No hay nombres');return}const ya=new Set((c.alumnos||[]).map(a=>normNombre(a.nombre))),nuevos=nombres.filter(n=>!ya.has(normNombre(n)));if(!nuevos.length){toast('Todos ya estaban en el curso');return}pushH();c.alumnos=c.alumnos||[];nuevos.forEach(n=>c.alumnos.push({id:'a'+uid(),nombre:n,alta:td(),baja:null,codigo:randCode()}));c.alumnos.sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));save();render();toast(nuevos.length+' alumnos agregados')}
 function addAl(){const v=$('#nn').value.trim();if(!v)return;pushH();const c=C();c.alumnos=c.alumnos||[];c.alumnos.push({id:'a'+uid(),nombre:v,alta:td(),baja:null,codigo:randCode()});c.alumnos.sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));save();render();toast('Agregado')}
 
@@ -512,14 +607,64 @@ async function nubeKey(code){let kc=lsGet(KC,{});if(kc.salt!==NB.salt||kc.it!==N
 async function estadoKey(){if(!_ek)_ek=await pubKdf(NB.token,PUB_E.encode('micurso-estado'),300000);return _ek}
 function programarSync(){if(!nubeOK()||!NB.auto||!D)return;nubeEstado='Pendiente…';clearTimeout(nubeTimer);nubeTimer=setTimeout(()=>publicarNube(false),6000)}
 async function nubeGuardarEstado(force){const k=await estadoKey(),blob=JSON.stringify(await pubSeal(k,D)),r=await apiPost('save',{blob,base:NB.lastState||'',force:!!force});if(r.ok){NB.lastState=r.ts;lsSet(NK,NB);return 'ok'}if(r.err==='conflicto')return 'conflicto';throw new Error(r.err==='clave'?'la clave no coincide':(r.err||'no se pudo guardar'))}
-async function publicarNube(modo){if(!nubeOK()||!D||nubeBusy)return;nubeBusy=true;nubeEstado='Sincronizando…';try{if(await nubeGuardarEstado(false)==='conflicto'){nubeEstado='⚠ Conflicto';toast('La nube tiene datos más nuevos de otro dispositivo. Abrí ☁️ y elegí Restaurar o Sobrescribir.');return}const lista=[];D.cursos.forEach(c=>(c.alumnos||[]).forEach(s=>{if(s.codigo&&!s.baja)lista.push([c,s])}));const ph=lsGet(PH,{}),nuevos={},items={},keep=[];let n=0;for(const[c,s]of lista){const kc=lsGet(KC,{});if(!(kc.salt===NB.salt&&kc.it===NB.it&&kc.k&&kc.k[s.codigo])){nubeEstado='Preparando '+(++n)+'…'}const k=await nubeKey(s.codigo),idx=await pubIdx(k),pl=pubPayload(c,s),h=await hashStr(JSON.stringify(Object.assign({},pl,{u:''})));keep.push(idx);nuevos[idx]=h;if(modo==='todo'||ph[idx]!==h)items[idx]=await pubSeal(k,pl)}const r=await apiPost('pub',{salt:NB.salt,it:NB.it,items,keep});if(!r.ok)throw new Error(r.err==='clave'?'la clave no coincide':(r.err||'respuesta inválida'));lsSet(PH,nuevos);nubeEstado='Sincronizado '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});if(modo)toast('Listo: '+Object.keys(items).length+' alumnos actualizados en la nube')}catch(e){console.error(e);nubeEstado='Error de conexión';if(modo)toast('No se pudo sincronizar: '+(e&&e.message||e))}finally{nubeBusy=false}}
-async function nubeRestaurar(){if(!nubeOK()){toast('Primero guardá la conexión');return}try{const r=await apiPost('state');if(!r.ok||!r.blob){toast('No hay una copia guardada en la nube');return}let o;try{o=await pubOpen(await estadoKey(),JSON.parse(r.blob))}catch(e){throw new Error('la clave no corresponde a esta copia')}if(!o||!Array.isArray(o.cursos))throw new Error('copia inválida');if(!confirm('¿Reemplazar los datos de ESTE dispositivo por la copia de la nube ('+new Date(r.ts).toLocaleString('es-AR')+')?'))return;if(D)pushH();D=o;cur=0;NB.lastState=r.ts;lsSet(NK,NB);save();render();closeModal();toast('Datos restaurados desde la nube')}catch(e){toast('No se pudo restaurar: '+(e&&e.message||e))}}
-async function nubeSobrescribir(){if(!confirm('¿Reemplazar la copia de la nube con los datos de ESTE dispositivo?'))return;try{await nubeGuardarEstado(true);toast('La nube ahora tiene los datos de este dispositivo');publicarNube('todo')}catch(e){toast('No se pudo: '+(e&&e.message||e))}}
+async function publicarNube(modo){if(SUPABASE_MODE&&!esAdmin()){toast('Solo el administrador puede publicar datos para padres');return}if(!nubeOK()||!D||nubeBusy)return;nubeBusy=true;nubeEstado='Sincronizando…';try{if(!SUPABASE_MODE&&await nubeGuardarEstado(false)==='conflicto'){nubeEstado='⚠ Conflicto';toast('La nube tiene datos más nuevos de otro dispositivo. Abrí ☁️ y elegí Restaurar o Sobrescribir.');return}const lista=[];D.cursos.forEach(c=>(c.alumnos||[]).forEach(s=>{if(s.codigo&&!s.baja)lista.push([c,s])}));const ph=lsGet(PH,{}),nuevos={},items={},keep=[];let n=0;for(const[c,s]of lista){const kc=lsGet(KC,{});if(!(kc.salt===NB.salt&&kc.it===NB.it&&kc.k&&kc.k[s.codigo])){nubeEstado='Preparando '+(++n)+'…'}const k=await nubeKey(s.codigo),idx=await pubIdx(k),pl=pubPayload(c,s),h=await hashStr(JSON.stringify(Object.assign({},pl,{u:''})));keep.push(idx);nuevos[idx]=h;if(modo==='todo'||ph[idx]!==h)items[idx]=await pubSeal(k,pl)}const r=await apiPost('pub',{salt:NB.salt,it:NB.it,items,keep});if(!r.ok)throw new Error(r.err==='clave'?'la clave no coincide':(r.err||'respuesta inválida'));lsSet(PH,nuevos);nubeEstado='Sincronizado '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});if(modo)toast('Listo: '+Object.keys(items).length+' alumnos actualizados en la nube')}catch(e){console.error(e);nubeEstado='Error de conexión';if(modo)toast('No se pudo sincronizar: '+(e&&e.message||e))}finally{nubeBusy=false}}
+async function nubeRestaurar(){if(SUPABASE_MODE){toast('La restauración completa no está disponible con permisos por curso');return}if(!nubeOK()){toast('Primero guardá la conexión');return}try{const r=await apiPost('state');if(!r.ok||!r.blob){toast('No hay una copia guardada en la nube');return}let o;try{o=await pubOpen(await estadoKey(),JSON.parse(r.blob))}catch(e){throw new Error('la clave no corresponde a esta copia')}if(!o||!Array.isArray(o.cursos))throw new Error('copia inválida');if(!confirm('¿Reemplazar los datos de ESTE dispositivo por la copia de la nube ('+new Date(r.ts).toLocaleString('es-AR')+')?'))return;if(D)pushH();D=o;cur=0;NB.lastState=r.ts;lsSet(NK,NB);save();render();closeModal();toast('Datos restaurados desde la nube')}catch(e){toast('No se pudo restaurar: '+(e&&e.message||e))}}
+async function nubeSobrescribir(){if(SUPABASE_MODE){toast('La sobrescritura completa no está disponible con permisos por curso');return}if(!confirm('¿Reemplazar la copia de la nube con los datos de ESTE dispositivo?'))return;try{await nubeGuardarEstado(true);toast('La nube ahora tiene los datos de este dispositivo');publicarNube('todo')}catch(e){toast('No se pudo: '+(e&&e.message||e))}}
 function nubeGenClave(){const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';document.getElementById('nbTok').value=Array.from(crypto.getRandomValues(new Uint8Array(24))).map(x=>A[x%A.length]).join('')}
 async function nubeCopiarCodigo(){if(!document.getElementById('nbTok').value.trim())nubeGenClave();const code=CODE_GS.replace('__TOKEN__',()=>document.getElementById('nbTok').value.trim());try{await navigator.clipboard.writeText(code);toast('Código copiado. Pegalo en Apps Script.')}catch(e){const b=document.getElementById('nbCode');b.style.display='block';b.value=code;b.select();toast('Copiá el texto que apareció abajo')}}
 function nubeDescargarIndex(){const html=PADRES_TPL.replace('__API_URL__',()=>NB.url),a=document.createElement('a');a.href=URL.createObjectURL(new Blob([html],{type:'text/html'}));a.download='index.html';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000);toast('Descargado index.html: subilo a tu sitio web')}
 async function nubeGuardarConfig(){const url=document.getElementById('nbUrl').value.trim(),token=document.getElementById('nbTok').value.trim();if(!/^https:\/\/script\.google\.com\/.+/.test(url)){toast('La URL debe empezar con https://script.google.com/…');return}if(token.length<12){toast('La clave es muy corta');return}const p=NB||{};NB={url,token,auto:document.getElementById('nbAuto').checked,salt:p.salt||pubB64(crypto.getRandomValues(new Uint8Array(16))),it:p.it||600000,lastState:(p.token===token&&p.url===url)?(p.lastState||''):''};lsSet(NK,NB);_ek=null;try{const r=await apiPost('ping');if(!r.ok)throw new Error(r.err==='clave'?'la clave no coincide con la del servidor':(r.err||'sin respuesta'));nubeEstado='Conectada';toast('Conexión correcta ✔');openNube()}catch(e){toast('No se pudo conectar: '+(e&&e.message||e))}}
 function nubeDesconectar(){if(!confirm('¿Desconectar la nube de este dispositivo? Tus datos locales no se borran.'))return;NB=null;try{localStorage.removeItem(NK);localStorage.removeItem(KC);localStorage.removeItem(PH)}catch(e){}nubeEstado='';render();closeModal();toast('Nube desconectada')}
+async function adminAccesos(){
+ if(!SUPABASE_MODE||!esAdmin()){toast('Solo el administrador puede asignar cursos');return}
+ const {data,error}=await sb.from('course_access').select('email,course_id,access_level').order('email');
+ if(error){toast('No se pudieron cargar los permisos: '+error.message);return}
+ sbAccessRows=data||[];
+ const cursos=D.cursos||[];
+ $('#modalBox').innerHTML=`<h2>Acceso de docentes</h2><p class=muted>Asigná cada cuenta Google a cursos completos, con permiso para ver o editar.</p>${cursos.length?`<div class=row style="align-items:end;margin:10px 0"><label style="flex:1;min-width:190px">Correo Google<br><input id=sbAccessEmail type=email placeholder="docente@gmail.com" style="width:100%"></label><label>Curso<br><select id=sbAccessCourse>${cursos.map(c=>`<option value="${esc(c.id)}">${esc(c.nombre||c.id)}</option>`).join('')}</select></label><label>Permiso<br><select id=sbAccessLevel><option value="view">Solo lectura</option><option value="edit">Puede editar</option></select></label><button onclick="sbAsignarAcceso()">Asignar</button></div>`:'<p class=muted>Primero importá los cursos.</p>'}<div id=sbAccessList>${sbAccesosHtml()}</div><div class=row style="margin-top:10px"><button class=ghost onclick="closeModal()">Cerrar</button></div>`;
+ $('#modal').classList.add('on');
+ document.querySelectorAll('[data-revoke-email]').forEach(b=>b.addEventListener('click',()=>sbRevocarAcceso(b.dataset.revokeEmail,b.dataset.revokeCourse)));
+}
+function sbAccesosHtml(){if(!sbAccessRows.length)return'<p class=muted>No hay docentes asignados todavía.</p>';return'<div class=wrap><table><thead><tr><th>Correo</th><th>Curso</th><th>Permiso</th><th></th></tr></thead><tbody>'+sbAccessRows.map(x=>{const c=(D.cursos||[]).find(y=>y.id===x.course_id);return`<tr><td>${esc(x.email)}</td><td>${esc(c&&c.nombre||x.course_id)}</td><td>${x.access_level==='edit'?'Puede editar':'Solo lectura'}</td><td><button class="ghost mini" data-revoke-email="${esc(x.email)}" data-revoke-course="${esc(x.course_id)}">Quitar</button></td></tr>`}).join('')+'</tbody></table></div>'}
+async function sbAsignarAcceso(){
+ if(!esAdmin())return;
+ const email=document.getElementById('sbAccessEmail').value.trim().toLowerCase(),courseId=document.getElementById('sbAccessCourse').value,level=document.getElementById('sbAccessLevel').value;
+ if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){toast('Escribí un correo válido');return}
+ if(!['view','edit'].includes(level)){toast('Permiso inválido');return}
+ const {error}=await sb.from('course_access').upsert({email,course_id:courseId,access_level:level});
+ if(error){toast('No se pudo asignar el curso: '+error.message);return}
+ toast('Acceso guardado');adminAccesos();
+}
+async function sbRevocarAcceso(email,courseId){
+ if(!esAdmin()||!confirm('¿Quitar '+email+' del curso seleccionado?'))return;
+ const {error}=await sb.from('course_access').delete().eq('email',email).eq('course_id',courseId);
+ if(error){toast('No se pudo quitar el acceso: '+error.message);return}
+ sbAccessRows=sbAccessRows.filter(x=>x.email!==email||x.course_id!==courseId);adminAccesos();
+}
+function abrirImportacionSupabase(){
+ if(!esAdmin()){toast('Solo el administrador puede importar cursos');return}
+ sbImportData=null;
+ $('#modalBox').innerHTML=`<h2>Importar cursos a la base segura</h2><p class=muted>Elegí una copia JSON exportada desde Mi curso. Se agregarán los cursos nuevos; los que ya existan no se reemplazan.</p><input id=sbImportFile type=file accept=".json,application/json" onchange="leerImportacionSupabase(this)"><div id=sbImportPreview class=muted style="margin-top:8px"></div><div class=row style="margin-top:10px"><button id=sbImportButton onclick="importarSupabase()" disabled>Importar</button><button class=ghost onclick="closeModal()">Cancelar</button></div>`;
+ $('#modal').classList.add('on');
+}
+function leerImportacionSupabase(input){
+ const file=input.files&&input.files[0];if(!file)return;
+ const reader=new FileReader();reader.onload=()=>{try{const value=JSON.parse(reader.result);if(!value||!Array.isArray(value.cursos)||!value.cursos.every(c=>c&&typeof c.id==='string'&&c.id&&typeof c==='object'))throw new Error('El archivo no contiene cursos con identificadores válidos');sbImportData=value;document.getElementById('sbImportPreview').textContent=value.cursos.length+' cursos listos para importar.';document.getElementById('sbImportButton').disabled=!value.cursos.length}catch(e){sbImportData=null;document.getElementById('sbImportPreview').textContent='No se pudo leer el archivo: '+e.message;document.getElementById('sbImportButton').disabled=true}};reader.onerror=()=>{sbImportData=null;document.getElementById('sbImportPreview').textContent='No se pudo leer el archivo.'};reader.readAsText(file);
+}
+async function importarSupabase(){
+ if(!esAdmin()||!sbImportData||!confirm('¿Importar '+sbImportData.cursos.length+' cursos a Supabase? Los cursos con el mismo ID se conservarán sin cambios.'))return;
+ const existentes=new Set((D.cursos||[]).map(c=>c.id)),nuevos=sbImportData.cursos.filter(c=>!existentes.has(c.id));
+ if(!nuevos.length){toast('No hay cursos nuevos para importar');return}
+ let importados=0,fallidos=[];
+ for(const c of nuevos){const {error}=await sb.from('course_records').insert({id:c.id,name:c.nombre||c.id,course_data:c,updated_by:sbUser.id});if(error)fallidos.push((c.nombre||c.id)+': '+error.message);else importados++}
+ const settings={};Object.keys(sbImportData).forEach(k=>{if(k!=='cursos'&&k!=='v')settings[k]=sbImportData[k]});
+ if(importados&&Object.keys(settings).length){const {error}=await sb.from('app_settings').upsert({id:'global',settings});if(error)fallidos.push('Ajustes globales: '+error.message)}
+ try{
+  await cargarSupabase();render();
+  if(fallidos.length){$('#modalBox').innerHTML=`<h2>Importación parcial</h2><p>Se agregaron ${importados} cursos. Estos elementos no se importaron:</p><ul>${fallidos.map(x=>`<li>${esc(x)}</li>`).join('')}</ul><div class=row><button class=ghost onclick="closeModal()">Cerrar</button></div>`;console.error('Errores de importación',fallidos)}
+  else{closeModal();toast('Importados '+importados+' cursos')}
+ }catch(e){toast('Se importaron datos, pero no se pudieron recargar: '+e.message)}
+}
 function openNube(){
  const n=NB||{url:'',token:'',auto:true},ok=nubeOK();
  $('#modalBox').innerHTML=`<h2>☁️ Nube: padres online y tus datos en cualquier dispositivo</h2>
@@ -547,9 +692,11 @@ function parseAsistencia(rows){let fr=-1;for(let r=0;r<Math.min(rows.length,8);r
 function parseNotas(rows){let fNombre=-1;for(let r=0;r<rows.length;r++){if(String(rows[r][1]||'').toLowerCase()==='nombre'){fNombre=r;break}}if(fNombre<0)return{alumnos:[],circuitosPorAlumno:{},notasPorAlumno:{},cierresPorAlumno:{}};const alumnos=[];const circuitosPorAlumno={};const notasPorAlumno={};const cierresPorAlumno={};const enc1=rows[fNombre-1]||[];const enc1b=rows[fNombre-2]||[];const mapa1={};enc1.forEach((v,i)=>{const s=String(v||'').trim();if(/^\d+(\.0)?$/.test(s)){const n=parseInt(s);if(n>=1&&n<=37)mapa1[i]={tipo:'circ',nro:n};else if(n===38||n===41||n===42||(n>=43&&n<=48))mapa1[i]={tipo:'ev',nro:n}}});[enc1,enc1b].forEach(enc=>{enc.forEach((v,i)=>{const s=String(v||'').trim().toLowerCase();const keys=['1er','2do','3ro','4to','nota','dic','feb','f','avance 1er cuatrimentre','avance 2do cuatrimestre'];if(keys.includes(s)&&!mapa1[i])mapa1[i]={tipo:'cie',key:s}})});for(let r=fNombre+1;r<rows.length;r++){const row=rows[r]||[];const nombre=String(row[1]||'').trim();if(!nombre||/circuitos|promedio|nombre/i.test(nombre))break;const circs=[];const notas={};const cie={};Object.entries(mapa1).forEach(([i,m])=>{const v=row[i];if(m.tipo==='circ'&&String(v||'').toUpperCase()==='X')circs.push(m.nro);else if(m.tipo==='ev'&&v!==''&&v!=null&&!/recup.*final/i.test(String(m.nro)))notas['ev'+m.nro]=v;else if(m.tipo==='cie'&&v!==''&&v!=null)cie[m.key]=v});alumnos.push(nombre);circuitosPorAlumno[nombre]=circs;notasPorAlumno[nombre]=notas;cierresPorAlumno[nombre]=cie}
 let f2=-1;for(let r=fNombre+1;r<rows.length;r++){const row=rows[r]||[];const hasCirc=row.some(x=>String(x||'').toLowerCase()==='circuitos');if(hasCirc){f2=r;break}}if(f2>=0){let enc2=null;for(let k=1;k<=3;k++){const cand=rows[f2+k]||[];const nums=cand.filter(x=>/^\d+(\.0)?$/.test(String(x||'').trim())).length;if(nums>=3){enc2=cand;break}}if(enc2){const mapa2={};enc2.forEach((v,i)=>{const s=String(v||'').trim();if(/^\d+(\.0)?$/.test(s)){const n=parseInt(s);if(n>=25&&n<=48)mapa2[i]=n}});const startRow=(rows.indexOf(enc2))+1;for(let r=startRow;r<rows.length;r++){const row=rows[r]||[];const nombre=String(row[1]||'').trim();if(!nombre||/nombre|leyenda|sin fotocopias/i.test(nombre))continue;const idx=alumnos.findIndex(a=>normNombre(a)===normNombre(nombre));if(idx<0)continue;Object.entries(mapa2).forEach(([i,nro])=>{if(String(row[i]||'').toUpperCase()==='X'){const n=parseInt(nro);if(!circuitosPorAlumno[nombre].includes(n))circuitosPorAlumno[nombre].push(n)}})}}}return{alumnos,circuitosPorAlumno,notasPorAlumno,cierresPorAlumno}}
 function aplicarImport(){if(!_imp.hojas||(!_imp.hojas.asistencia&&!_imp.hojas.notas)){toast('No hay hojas válidas');return}if(!confirm('¿Fusionar los datos del Excel con el curso actual?'))return;pushH();const c=C();if(_imp.hojas.asistencia){const {alumnos}=parseAsistencia(_imp.hojas.asistencia);alumnos.forEach(a=>{let al=(c.alumnos||[]).find(x=>normNombre(x.nombre)===normNombre(a.nombre));if(!al){al={id:'a'+uid(),nombre:a.nombre,alta:td(),baja:null,codigo:randCode()};c.alumnos=c.alumnos||[];c.alumnos.push(al)}Object.entries(a.marcas).forEach(([f,v])=>{c.asistencia=c.asistencia||{};c.asistencia[f]=c.asistencia[f]||{};c.asistencia[f][al.id]=v})})}if(_imp.hojas.notas){const r=parseNotas(_imp.hojas.notas);r.alumnos.forEach(nombre=>{let al=(c.alumnos||[]).find(x=>normNombre(x.nombre)===normNombre(nombre));if(!al){al={id:'a'+uid(),nombre,alta:td(),baja:null,codigo:randCode()};c.alumnos=c.alumnos||[];c.alumnos.push(al)}(r.circuitosPorAlumno[nombre]||[]).forEach(nro=>{const id='c'+String(nro).padStart(2,'0');c.circuitosHechos=c.circuitosHechos||{};c.circuitosHechos[al.id]=c.circuitosHechos[al.id]||[];if(!c.circuitosHechos[al.id].includes(id))c.circuitosHechos[al.id].push(id)});Object.entries(r.notasPorAlumno[nombre]||{}).forEach(([k,v])=>{const nro=parseInt(k.replace('ev',''));c.evaluaciones=c.evaluaciones||[];let ev=c.evaluaciones.find(e=>String(e.tema).includes(String(nro))||String(e.tipo||'').includes(String(nro)));if(!ev){ev={id:'ev_'+nro,tema:'Evaluación '+nro,tipo:''};c.evaluaciones.push(ev)}c.notas=c.notas||{};c.notas[al.id]=c.notas[al.id]||{};c.notas[al.id][ev.id]={v:v,f:td()}});Object.entries(r.cierresPorAlumno[nombre]||{}).forEach(([k,v])=>{c.cierres=c.cierres||{};c.cierres[al.id]=c.cierres[al.id]||{};const key=k==='avance 1er cuatrimentre'?'1er':k==='avance 2do cuatrimestre'?'2do':k;c.cierres[al.id][key]=v})})}c.alumnos=(c.alumnos||[]).sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));save();render();closeModal();toast('Importado. Podés deshacer con ↶')}
+function aplicarImport(){if(SUPABASE_MODE&&!puedeEditarCurso()){toast('Tu cuenta no puede editar este curso');return}if(!_imp.hojas||(!_imp.hojas.asistencia&&!_imp.hojas.notas)){toast('No hay hojas válidas');return}if(!confirm('¿Fusionar los datos del Excel con el curso actual?'))return;pushH();const c=C();if(_imp.hojas.asistencia){const {alumnos}=parseAsistencia(_imp.hojas.asistencia);alumnos.forEach(a=>{let al=(c.alumnos||[]).find(x=>normNombre(x.nombre)===normNombre(a.nombre));if(!al){al={id:'a'+uid(),nombre:a.nombre,alta:td(),baja:null,codigo:randCode()};c.alumnos=c.alumnos||[];c.alumnos.push(al)}Object.entries(a.marcas).forEach(([f,v])=>{c.asistencia=c.asistencia||{};c.asistencia[f]=c.asistencia[f]||{};c.asistencia[f][al.id]=v})})}if(_imp.hojas.notas){const r=parseNotas(_imp.hojas.notas);r.alumnos.forEach(nombre=>{let al=(c.alumnos||[]).find(x=>normNombre(x.nombre)===normNombre(nombre));if(!al){al={id:'a'+uid(),nombre,alta:td(),baja:null,codigo:randCode()};c.alumnos=c.alumnos||[];c.alumnos.push(al)}(r.circuitosPorAlumno[nombre]||[]).forEach(nro=>{const id='c'+String(nro).padStart(2,'0');c.circuitosHechos=c.circuitosHechos||{};c.circuitosHechos[al.id]=c.circuitosHechos[al.id]||[];if(!c.circuitosHechos[al.id].includes(id))c.circuitosHechos[al.id].push(id)});Object.entries(r.notasPorAlumno[nombre]||{}).forEach(([k,v])=>{const nro=parseInt(k.replace('ev',''));c.evaluaciones=c.evaluaciones||[];let ev=c.evaluaciones.find(e=>String(e.tema).includes(String(nro))||String(e.tipo||'').includes(String(nro)));if(!ev){ev={id:'ev_'+nro,tema:'Evaluación '+nro,tipo:''};c.evaluaciones.push(ev)}c.notas=c.notas||{};c.notas[al.id]=c.notas[al.id]||{};c.notas[al.id][ev.id]={v:v,f:td()}});Object.entries(r.cierresPorAlumno[nombre]||{}).forEach(([k,v])=>{c.cierres=c.cierres||{};c.cierres[al.id]=c.cierres[al.id]||{};const key=k==='avance 1er cuatrimentre'?'1er':k==='avance 2do cuatrimestre'?'2do':k;c.cierres[al.id][key]=v})})}c.alumnos=(c.alumnos||[]).sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));save();render();closeModal();toast('Importado. Podés deshacer con ↶')}
 
 // Nuevo curso
 function nuevoAnio(){
+ if(SUPABASE_MODE&&!esAdmin()){toast('Solo el administrador puede crear cursos');return}
  const c=C()||{nombre:'',materia:'',docente:'',anio:new Date().getFullYear()-1,evaluaciones:[],cierreCols:['1er','2do','3ro']};
  $('#modalBox').innerHTML=`<h2>Nuevo curso / año</h2>
   <p class=muted>Se crea vacío: no trae alumnos, asistencia ni notas.</p>
@@ -562,6 +709,7 @@ function nuevoAnio(){
  $('#modal').classList.add('on');
 }
 function crearCurso(){
+ if(SUPABASE_MODE&&!esAdmin()){toast('Solo el administrador puede crear cursos');return}
  const c=C()||{anio:new Date().getFullYear()-1,evaluaciones:[],cierreCols:['1er','2do','3ro']},nombre=$('#ncNom').value.trim();
  if(!nombre){toast('Falta el nombre del curso');return}
  const nombres=listaDesdeTexto($('#ncLista').value);
@@ -578,6 +726,7 @@ function expJSON(){const a=document.createElement('a');a.href='data:application/
 
 // Cargar JSON
 function openImportJSON(){
+ if(SUPABASE_MODE){abrirImportacionSupabase();return}
  $('#modalBox').innerHTML=`<h2>Cargar JSON</h2>
   <p class=muted>Elegí el archivo .json o pegá el texto. Podés <b>agregar</b> los cursos a los que ya tenés, o <b>reemplazar</b> todo.</p>
   <div class=row style="margin:8px 0">
@@ -597,6 +746,7 @@ function openImportJSON(){
 }
 function readJSONModal(inp){const f=inp.files[0];if(!f)return;const msg=$('#jsonMsg');if(msg)msg.textContent='Leyendo…';const r=new FileReader();r.onload=e=>{try{const o=JSON.parse(e.target.result);if(!o.cursos)throw new Error('sin cursos');$('#js').value=JSON.stringify(o);if(msg)msg.textContent='Leído. Elegí Agregar o Reemplazar.'}catch(x){if(msg)msg.textContent='Error: '+x.message}};r.readAsText(f)}
 function doImportJSON(modo){
+ if(SUPABASE_MODE){toast('Usá la importación segura de cursos');return}
  try{
   const el=document.getElementById('js');if(!el){toast('No se encontró el campo de texto');return}
   const o=JSON.parse(el.value);if(!o.cursos||!Array.isArray(o.cursos))throw new Error('sin cursos');
@@ -611,8 +761,8 @@ function doImportJSON(modo){
 }
 function closeModal(){$('#modal').classList.remove('on')}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#modal').classList.contains('on'))closeModal()});
-function loadJSON(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{const o=JSON.parse(e.target.result);if(!o.cursos)throw 0;pushH();D=o;cur=0;save();render();toast('Datos cargados: '+o.cursos.length+' cursos')}catch(x){toast('Archivo inválido')}};r.readAsText(f)}
-function blank(){if(!confirm('¿Empezar sin datos?'))return;D={v:6,cursos:[],circuitos:{}};save();render()}
+function loadJSON(inp){if(SUPABASE_MODE){abrirImportacionSupabase();return}const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{const o=JSON.parse(e.target.result);if(!o.cursos)throw 0;pushH();D=o;cur=0;save();render();toast('Datos cargados: '+o.cursos.length+' cursos')}catch(x){toast('Archivo inválido')}};r.readAsText(f)}
+function blank(){if(SUPABASE_MODE){toast('No se puede reemplazar la base segura desde aquí');return}if(!confirm('¿Empezar sin datos?'))return;D={v:6,cursos:[],circuitos:{}};save();render()}
 
 // Publicar padres
 const PUB_E=new TextEncoder();
@@ -645,6 +795,7 @@ function pubPayload(c,s){
 }
 let _pub=false;
 async function publicarPadres(){
+ if(SUPABASE_MODE&&!esAdmin()){toast('Solo el administrador puede publicar datos para padres');return}
  if(nubeOK()){publicarNube('todo');return}
  if(_pub)return;if(!D||!D.cursos.length){toast('No hay cursos');return}
  const lista=[];D.cursos.forEach(c=>(c.alumnos||[]).forEach(s=>{if(s.codigo&&!s.baja)lista.push([c,s])}));
@@ -677,5 +828,5 @@ function copiarAlumnosActuales(){document.getElementById('ncLista').value=((C()|
 const CODE_GS="/* Mi curso - servidor de datos (Google Apps Script). Guarda SOLO información cifrada. */\nvar TOKEN = '__TOKEN__';\nfunction hoja_(n){var s=SpreadsheetApp.getActiveSpreadsheet(),h=s.getSheetByName(n);return h||s.insertSheet(n)}\nfunction salida_(o){return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON)}\nfunction meta_(){var d=hoja_('meta').getDataRange().getValues(),m={},i;for(i=0;i<d.length;i++){if(d[i][0]!=='')m[d[i][0]]=d[i][1]}return m}\nfunction setMeta_(obj){var h=hoja_('meta'),d=h.getDataRange().getValues(),pos={},i,k;for(i=0;i<d.length;i++){if(d[i][0]!=='')pos[d[i][0]]=i+1}for(k in obj){if(pos[k]){h.getRange(pos[k],2).setValue(obj[k])}else{h.appendRow([k,obj[k]]);pos[k]=h.getLastRow()}}}\nfunction leer_(h){var d=h.getDataRange().getValues(),out=[],i;for(i=0;i<d.length;i++){if(d[i][0]!==''&&d[i][0]!==undefined)out.push(d[i])}return out}\nfunction doGet(e){var p=(e&&e.parameter)||{};try{if(p.a==='meta'){var m=meta_();return salida_({ok:true,v:2,salt:m.salt||'',it:Number(m.it)||0,gen:m.gen||''})}if(p.a==='get'){var k=String(p.k||'');if(!/^[0-9a-f]{24}$/.test(k))return salida_({ok:false});var filas=leer_(hoja_('padres')),i;for(i=0;i<filas.length;i++){if(filas[i][0]==='x'+k)return salida_({ok:true,i:String(filas[i][1]).slice(1),c:String(filas[i][2]).slice(1)})}return salida_({ok:false});}return salida_({ok:true,servicio:'Mi curso'});}catch(err){return salida_({ok:false,err:String(err)})}}\nfunction doPost(e){var lock=LockService.getScriptLock(),tomado=false;try{var b=JSON.parse(e.postData.contents);if(b.t!==TOKEN)return salida_({ok:false,err:'clave'});lock.waitLock(20000);tomado=true;var ahora=new Date().toISOString(),i,k,m;if(b.a==='ping')return salida_({ok:true});if(b.a==='pub'){var h=hoja_('padres'),filas=leer_(h),mapa={},items=b.items||{},keep={};for(i=0;i<(b.keep||[]).length;i++)keep[b.keep[i]]=1;for(i=0;i<filas.length;i++)mapa[String(filas[i][0]).slice(1)]=filas[i];for(k in items){if(!/^[0-9a-f]{24}$/.test(k))continue;mapa[k]=['x'+k,'x'+items[k].i,'x'+items[k].c,ahora];keep[k]=1}var final=[];for(k in mapa){if(keep[k])final.push(mapa[k])}h.clearContents();if(final.length)h.getRange(1,1,final.length,4).setValues(final);setMeta_({salt:b.salt,it:b.it,gen:ahora});return salida_({ok:true,n:final.length,gen:ahora});}if(b.a==='save'){m=meta_();if(!b.force&&m.estado_ts&&b.base!==m.estado_ts)return salida_({ok:false,err:'conflicto',ts:m.estado_ts});var s=String(b.blob||''),hh=hoja_('estado'),rows=[];for(i=0;i<s.length;i+=40000)rows.push(['x'+s.slice(i,i+40000)]);hh.clearContents();if(rows.length)hh.getRange(1,1,rows.length,1).setValues(rows);setMeta_({estado_ts:ahora});return salida_({ok:true,ts:ahora});}if(b.a==='state'){m=meta_();var fs=leer_(hoja_('estado')),t='';for(i=0;i<fs.length;i++)t+=String(fs[i][0]).slice(1);return salida_({ok:true,blob:t,ts:m.estado_ts||''})}return salida_({ok:false,err:'accion'});}catch(err){return salida_({ok:false,err:String(err)})}finally{if(tomado){try{lock.releaseLock()}catch(x){}}}}\n";
 const PADRES_TPL="<!doctype html>\n<html lang=\"es\"><head><meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">\n<meta name=\"robots\" content=\"noindex,nofollow\">\n<title>Seguimiento del alumno<\/title>\n<style>\n:root{--bg:#f6f7f9;--card:#fff;--tx:#1b2430;--mu:#6b7686;--bd:#e1e5ea;--ac:#2a62d9;--ok:#1f9d55;--no:#d64545;--wa:#d9890f;color-scheme:light}\n@media(prefers-color-scheme:dark){:root:not([data-theme=\"light\"]){--bg:#14181e;--card:#1d232c;--tx:#e8ecf1;--mu:#93a0b1;--bd:#2c3542;--ac:#6b95f0;--ok:#43c27a;--no:#f07070;--wa:#e9a73e;color-scheme:dark}}\n*{box-sizing:border-box}\nbody{margin:0;background:var(--bg);color:var(--tx);font:16px/1.45 system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}\n#app{max-width:720px;margin:0 auto;padding:14px}\nh1{font-size:21px;margin:0 0 2px}h2{font-size:16px;margin:0 0 8px}\n.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px;margin-bottom:10px}\n.muted{color:var(--mu);font-size:14px}\n.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}\ninput{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px 13px;text-transform:uppercase;letter-spacing:2px;font-weight:700;font-family:ui-monospace,Consolas,monospace}\nbutton{font:inherit;cursor:pointer;background:var(--ac);color:#fff;border:0;border-radius:10px;padding:12px 18px;font-weight:700}\nbutton.ghost{background:var(--card);color:var(--tx);border:1px solid var(--bd)}button:disabled{opacity:.6;cursor:wait}\n.big{font-size:30px;font-weight:700;line-height:1.1}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;text-align:center;margin-top:6px}\n.item{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--bd)}.item:last-child{border:0}\n.ok{color:var(--ok);font-weight:600}.no{color:var(--no);font-weight:600}\n.bar{height:10px;background:var(--bd);border-radius:6px;overflow:hidden;margin:8px 0}.bar i{display:block;height:100%;background:var(--ok)}\n.pill{display:inline-block;padding:3px 10px;border-radius:10px;font-size:13px;background:var(--bd);color:var(--mu);margin:2px}\n.pill.no{background:rgba(214,69,69,.15);color:var(--no)}.pill.ok{background:rgba(31,157,85,.16);color:var(--ok)}.pill.wa{background:rgba(217,137,15,.2);color:var(--wa)}\n.chips{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}\n.chip{display:flex;flex-direction:column;align-items:center;min-width:40px;padding:3px 4px;border-radius:7px;background:var(--bd);color:var(--mu);font-size:12px}\n.chip b{font-size:14px}.chip i{font-style:normal;font-size:10px}\n.chip.P{background:var(--ok);color:#fff}.chip.A{background:var(--no);color:#fff}.chip.T{background:var(--wa);color:#fff}\n.alert{background:rgba(214,69,69,.12);border:1px solid var(--no);color:var(--no);border-radius:10px;padding:8px 10px;margin-top:10px;font-weight:600;font-size:14px}\n.note{font-size:13px;color:var(--mu);margin:6px 0 0}\n#msg{min-height:20px;font-size:14px;color:var(--mu);margin:8px 0 0}\nfooter{text-align:center;margin:26px 0 10px}\n@media print{button,.noprint{display:none!important}body{background:#fff}.card{break-inside:avoid}}\n<\/style><\/head><body>\n<div id=\"app\"><\/div>\n<script>\nconst $=s=>document.querySelector(s);\nconst esc=s=>String(s==null?'':s).replace(/[&<>\"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[m]));\nconst fd=d=>d?d.slice(8)+'/'+d.slice(5,7):'';\nconst fdl=d=>d?d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4):'';\nconst E=new TextEncoder(),ub=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));\nconst hex=u=>[...u].map(x=>x.toString(16).padStart(2,'0')).join('');\nasync function kdf(code,salt,it){const b=await crypto.subtle.importKey('raw',E.encode(code),'PBKDF2',false,['deriveBits']);return new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations:it,hash:'SHA-256'},b,256))}\nasync function h2(k,tag){const t=E.encode(tag),m=new Uint8Array(k.length+t.length);m.set(k);m.set(t,k.length);return new Uint8Array(await crypto.subtle.digest('SHA-256',m))}\nasync function idxOf(k){return hex((await h2(k,'idx')).slice(0,12))}\nasync function dec2(k,e){const ek=await crypto.subtle.importKey('raw',await h2(k,'enc'),'AES-GCM',false,['decrypt']);return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:ub(e.i)},ek,ub(e.c))))}\nasync function sha1(s){return hex(new Uint8Array(await crypto.subtle.digest('SHA-256',E.encode(s)))).slice(0,20)}\nasync function dec1(code,e){const b=await crypto.subtle.importKey('raw',E.encode(code),'PBKDF2',false,['deriveKey']);const k=await crypto.subtle.deriveKey({name:'PBKDF2',salt:ub(e.s),iterations:100000,hash:'SHA-256'},b,{name:'AES-GCM',length:256},false,['decrypt']);return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:ub(e.i)},k,ub(e.c))))}\nconst API_URL='__API_URL__';const API=API_URL.indexOf('__')===0?'':API_URL;\nlet META=null,SNAP=null,SINRED=false;\nasync function cargar(){\n if(API){try{const r=await fetch(API+'?a=meta',{cache:'no-store'}),j=await r.json();META=(j&&j.ok&&j.salt)?j:null;SINRED=false}catch(e){META=null;SINRED=true}return}\n try{const r=await fetch('datos-padres.json',{cache:'no-store'});if(!r.ok)throw 0;const j=await r.json();META=j;SNAP=j.snap||j}catch(e){META=null;SNAP=null}\n}\nfunction inicio(){\n const gen=META&&(META.generado||META.gen);\n let sv='';try{sv=localStorage.getItem('pcod')||''}catch(e){}\n $('#app').innerHTML=`<h1>🎓 Seguimiento del alumno<\/h1>\n <p class=muted>Ingresá el código que te entregó el docente.<\/p>\n <div class=card><div class=row>\n  <input id=cd value=\"${esc(sv)}\" placeholder=\"XXXX-XXXX\" maxlength=9 autocomplete=off autocapitalize=characters spellcheck=false style=\"flex:1;min-width:150px\">\n  <button id=vb onclick=\"ver()\">Ver<\/button><\/div><p id=msg role=status><\/p><\/div>\n <div id=rep><\/div>\n <footer class=muted>${gen?'Datos actualizados el '+new Date(gen).toLocaleString('es-AR',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}):''}<br>Si no tenés el código, pedíselo al docente del curso.<\/footer>`;\n $('#cd').addEventListener('keydown',e=>{if(e.key==='Enter')ver()});\n if(sv&&META)ver();\n}\nasync function ver(){\n const code=$('#cd').value.toUpperCase().replace(/[^A-Z0-9]/g,''),m=$('#msg'),b=$('#vb');\n if(!code){m.textContent='Escribí el código.';return}\n if(code.length!==8){m.textContent='El código tiene 8 letras y números (XXXX-XXXX).';return}\n if(!META&&API){m.textContent='Conectando…';await cargar()}\n if(!META){m.textContent=SINRED?'No se pudo conectar.':'Todavía no hay información publicada.';return}\n b.disabled=true;m.textContent='Verificando…';\n try{\n  let p=null;\n  if(API){const k=await kdf(code,ub(META.salt),META.it),r=await fetch(API+'?a=get&k='+await idxOf(k),{cache:'no-store'}),j=await r.json();if(j&&j.ok)p=await dec2(k,{i:j.i,c:j.c})}\n  else if(META.v===2){const k=await kdf(code,ub(META.salt),META.it),e=SNAP[await idxOf(k)];if(e)p=await dec2(k,e)}\n  else{const e=SNAP[await sha1('i:'+code)];if(e)p=await dec1(code,e)}\n  if(!p){m.textContent='Código no encontrado.';$('#rep').innerHTML='';try{localStorage.removeItem('pcod')}catch(x){}return}\n  m.textContent='';try{localStorage.setItem('pcod',code)}catch(x){}\n  mostrar(p);\n }catch(x){m.textContent='No se pudo abrir con ese código.';$('#rep').innerHTML=''}\n finally{b.disabled=false}\n}\nconst isN=v=>/^\\d+([.,]\\d+)?$/.test(String(v).trim()),nv=v=>parseFloat(String(v).replace(',','.'));\nfunction nota(v){if(isN(v))return`<b class=\"${nv(v)<7?'no':''}\">${esc(v)}<\/b>`;const u=String(v).toUpperCase();\n if(u==='TEA')return'<span class=\"pill ok\">TEA<\/span>';if(u==='TEP')return'<span class=\"pill wa\">TEP<\/span>';if(u==='TED')return'<span class=\"pill\" style=\"background:rgba(142,68,173,.2);color:#8e44ad\">TED<\/span>';\n if(u==='A')return'<span class=muted>Ausente<\/span>';if(u==='X')return'<span class=ok>✔<\/span>';return`<b>${esc(v)}<\/b>`}\nfunction recLegacy(p){const g={};(p.gr||[]).forEach(x=>{const t=String(x[0]).split(' · ')[0];(g[t]=g[t]||[]).push(x[1])});return Object.keys(g).filter(t=>{const n=g[t].filter(isN).map(nv);return n.length&&Math.max(...n)<7})}\nfunction mostrar(p){\n const tot=p.p+p.a+p.t,pc=tot?Math.round((p.p+p.t)/tot*100):null;\n const rec=Array.isArray(p.rec)?p.rec:recLegacy(p);\n let h=`<h1>${esc(p.n)}<\/h1><p class=muted style=\"margin-bottom:10px\">${esc(p.c)}${p.m?' · '+esc(p.m):''} · actualizado ${fdl(p.u)}<\/p>`;\n h+=`<div class=card><h2>Asistencia<\/h2>${pc===null?'<p class=muted>Todavía no hay clases registradas.<\/p>':`<div class=grid>\n  <div><div class=\"big ${pc<75?'no':pc<85?'':'ok'}\" style=\"${pc>=75&&pc<85?'color:var(--wa)':''}\">${pc}%<\/div><div class=muted>asistencia<\/div><\/div>\n  <div><div class=big>${p.p}<\/div><div class=muted>presentes<\/div><\/div>\n  <div><div class=\"big ${p.a?'no':''}\">${p.a}<\/div><div class=muted>ausentes<\/div><\/div>\n  <div><div class=big>${p.t}<\/div><div class=muted>tarde<\/div><\/div><\/div>\n  ${pc<75?'<div class=alert>⚠ La asistencia está por debajo del 75 %. Conviene hablar con el docente.<\/div>':''}\n  ${p.last.length?`<div class=chips>${p.last.slice().reverse().map(x=>`<span class=\"chip ${x[1]}\"><b>${{P:'P',A:'A',T:'T'}[x[1]]||''}<\/b><i>${fd(x[0])}<\/i><\/span>`).join('')}<\/div>`:''}`}<\/div>`;\n if((p.obs||[]).length)h+=`<div class=card><h2>Observaciones del docente<\/h2>${p.obs.map(o=>`<div class=item><span>${esc(o[1])}<\/span><span class=muted>${fd(o[0])}<\/span><\/div>`).join('')}<\/div>`;\n if(p.materias){\n  p.materias.forEach(m=>{\n   h+=`<div class=card><h2>${esc(m.nombre)}<\/h2>`;\n   if(m.circuitos&&m.circuitos.length){const ch=m.circuitos.filter(x=>x[1]).length,ct=m.circuitos.length,cp=ct?Math.round(ch/ct*100):0;h+=`<p>Circuitos: <b>${ch}<\/b> de <b>${ct}<\/b><\/p><div class=bar><i style=\"width:${cp}%\"><\/i><\/div>${m.circuitos.map(x=>`<div class=item><span>${esc(x[0])}<\/span><span class=\"${x[1]?'ok':'muted'}\">${x[1]?'✔ Hecho':'Pendiente'}<\/span><\/div>`).join('')}`}\n   if((m.notas||[]).length){h+='<div style=\"margin-top:8px\"><b>Notas<\/b><\/div>'+m.notas.map(x=>`<div class=item><span>${esc(x[0])}<\/span>${nota(x[1])}<\/div>`).join('')}else h+='<p class=muted>Sin notas.<\/p>';\n   if((m.practicas||[]).length){m.practicas.forEach(pr=>{const he=pr.partes.filter(Boolean).length;h+=`<div style=\"margin-top:10px\"><b>${esc(pr.nombre)}<\/b>: ${he}\/${pr.total}<\/div><div class=bar><i style=\"width:${Math.round(he\/pr.total*100)}%\"><\/i><\/div><div class=row style=\"flex-wrap:wrap;margin-top:4px\">`;pr.partes.forEach((ok,i)=>h+=`<span class=\"pill ${ok?'ok':'no'}\">P${i+1}<\/span>`);h+='<\/div>'})}\n   if(m.cierres&&Object.keys(m.cierres).length){h+='<div style=\"margin-top:10px\"><b>Cierres<\/b><\/div>'+Object.entries(m.cierres).map(([k,v])=>`<div class=item><span>${esc(k)}<\/span>${nota(v)}<\/div>`).join('')}\n   if((m.rec||[]).length)h+=`<div style=\"margin-top:10px\"><b>Temas a recuperar<\/b><\/div>${m.rec.map(t=>`<span class=\"pill no\">${esc(t)}<\/span>`).join('')}`;\n   h+='<\/div>';\n  });\n }\n if(rec.length&&!p.materias)h+=`<div class=card><h2>Temas a recuperar<\/h2>${rec.map(t=>`<span class=\"pill no\">${esc(t)}<\/span>`).join('')}<\/div>`;\n if((p.materias||[]).some(m=>Object.keys(m.fot||{}).length)){\n  h+=`<div class=card><h2>Fotocopias que no trajo<\/h2>`;\n  (p.materias||[]).forEach(m=>{const f=m.fot||{};const l=Object.entries(f).filter(([t,n])=>n>0);if(l.length){h+=`<div style=\"margin-top:6px\"><b>${esc(m.nombre)}<\/b><\/div>`;l.forEach(([t,n])=>h+=`<div class=item><span>${esc(t)}<\/span><b class=no>${n}<\/b><\/div>`)}});\n  h+=`<p class=note>“No trajo la fotocopia” no afecta la nota, pero ayuda a saber si falta material.<\/p><\/div>`;\n }\n h+=`<div class=\"card noprint\" style=\"text-align:center\"><div class=row style=\"justify-content:center\"><button class=ghost onclick=\"print()\">Imprimir<\/button><button class=ghost onclick=\"salir()\">Consultar otro código<\/button><\/div><\/div>`;\n $('#rep').innerHTML=h;\n}\nfunction salir(){try{localStorage.removeItem('pcod')}catch(e){}inicio()}\n(async()=>{await cargar();inicio()})();\n<\/script><\/body><\/html>\n";
 
-D=load();render();
+iniciarSupabase().catch(e=>{console.error('No se pudo iniciar la aplicación',e);sbAuthError=e.message||String(e);sbAuthLoading=false;render()});
 </script></body></html>
