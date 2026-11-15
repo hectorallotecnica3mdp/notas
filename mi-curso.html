@@ -126,15 +126,18 @@ function temasPend(c,id){return temasEvaluados(c).filter(t=>!temaAprobado(c,id,t
 
 function matSel(c){if(!c.materias||!c.materias.length)return null;const id=c._matSel||c.materias[0].id;return c.materias.find(x=>x.id===id)||c.materias[0]}
 function temasDeMateria(m){try{return [...new Set((m.evaluaciones||[]).map(e=>e.tema))]}catch(e){return[]}}
-function mejorTemaMateria(c,id,m,tema){try{const evs=(m.evaluaciones||[]).filter(e=>e.tema===tema);let best=null;evs.forEach(e=>{const n=parseNum(notaDe(((c.notas||{})[id]||{})[e.id]));if(n!=null&&(best==null||n>best))best=n});return best}catch(e){return null}}
+function esLaminas3ro(c,m){return !!c&&c.id==='3ro2da'&&!!m&&m.id==='lt'}
+function segundaNotaLaminaId(eid){return eid+'_nota2'}
+function notasMateriaEval(c,id,m,e){const notas=(c.notas||{})[id]||{};return esLaminas3ro(c,m)?[notas[e.id],notas[segundaNotaLaminaId(e.id)]]:[notas[e.id]]}
+function mejorTemaMateria(c,id,m,tema){try{const evs=(m.evaluaciones||[]).filter(e=>e.tema===tema);let best=null;evs.forEach(e=>notasMateriaEval(c,id,m,e).forEach(v=>{const n=parseNum(notaDe(v));if(n!=null&&(best==null||n>best))best=n}));return best}catch(e){return null}}
 function temaAprobadoMateria(c,id,m,tema){
  const evs=(m.evaluaciones||[]).filter(e=>e.tema===tema);
  let ult=null,best=null,hayTEP=false,hayNumBaja=false;
- evs.forEach(e=>{const v=notaDe(((c.notas||{})[id]||{})[e.id]);if(v==null||v==='')return;ult=v;
+ evs.forEach(e=>notasMateriaEval(c,id,m,e).forEach(nota=>{const v=notaDe(nota);if(v==null||v==='')return;ult=v;
   const n=parseNum(v);
   if(n!=null){if(best==null||n>best)best=n;if(n<APROB)hayNumBaja=true}
   else{const u=String(v).toUpperCase();if(u==='TEP')hayTEP=true}
- });
+ }));
  if(ult==null)return false;
  if(String(ult).toUpperCase()==='TEA')return true;
  if(hayTEP||hayNumBaja)return false;
@@ -195,16 +198,30 @@ function setTab(k){tab=k;render()}
 window.setTab=setTab;
 function toggleEdit(){edit=!edit;clearTimeout(window._e);if(edit)window._e=setTimeout(()=>{edit=false;render()},10*60000);render();toast(edit?'✏️ Edición activada':'🔒 Modo ver')}
 window.toggleEdit=toggleEdit;
-function abrirMenu(e){if(e){e.preventDefault();e.stopPropagation()}const m=$('#menu');if(m)m.classList.toggle('on')}
+function abrirMenu(e){
+ if(e){e.preventDefault();e.stopPropagation()}
+ const m=$('#menu');if(!m)return;
+ if(m.classList.contains('on')){closeMenu();return}
+ m.classList.add('on');
+ if(window.matchMedia&&window.matchMedia('(max-width: 640px)').matches){
+  const b=$('#menuBtn').getBoundingClientRect(),pad=12,gap=6,w=Math.min(Math.max(m.scrollWidth,260),window.innerWidth-pad*2),h=Math.min(m.scrollHeight,window.innerHeight-pad*2);
+  const left=Math.max(pad,Math.min(b.right-w,window.innerWidth-w-pad));
+  let top=b.bottom+gap;
+  if(top+h>window.innerHeight-pad){const above=b.top-gap-h;top=above>=pad?above:Math.max(pad,window.innerHeight-pad-h)}
+  Object.assign(m.style,{position:'fixed',left:left+'px',right:'auto',top:top+'px',width:w+'px',minWidth:'0',maxHeight:Math.max(0,Math.min(h,window.innerHeight-top-pad))+'px',overflowY:'auto'});
+ }
+}
 window.abrirMenu=abrirMenu;
-function closeMenu(){const m=$('#menu');if(m)m.classList.remove('on')}
+function closeMenu(){const m=$('#menu');if(!m)return;m.classList.remove('on');m.removeAttribute('style')}
 window.closeMenu=closeMenu;
-document.addEventListener('click',e=>{const m=$('#menu');if(!m||!m.classList.contains('on'))return;const w=m.closest('.menuWrap');if(w&&!w.contains(e.target))m.classList.remove('on')});
+document.addEventListener('click',e=>{const m=$('#menu');if(!m||!m.classList.contains('on'))return;const w=m.closest('.menuWrap');if(w&&!w.contains(e.target))closeMenu()});
+window.addEventListener('resize',closeMenu);
 
 function render(){
  const app=$('#app');
  try{
   if(!D){app.innerHTML=`<div class=hero><div class=big>🎓 Mi curso</div><p class=muted>Cargá el archivo de datos para empezar.</p><label class=btn-file>📂 Cargar datos-2026.json<input type=file accept=".json" onchange="loadJSON(this)"></label><p class=muted style="margin-top:20px">o <a href="#" onclick="blank();return false">empezar vacío</a></p><p class=muted>¿Ya usás la nube? <a href="#" onclick="openNube();return false">☁️ Conectar y restaurar mis datos</a></p></div>`;return}
+  let migrado=false;(D.cursos||[]).forEach(c=>{if(normalizarFotocopias(c))migrado=true});if(migrado)save();
   const c=C();
   if(!c){app.innerHTML='<div class=card><b>No hay cursos.</b><p class=muted>Creá uno nuevo o recuperá el último con Deshacer.</p><div class=row><button onclick="nuevoAnio()">➕ Crear curso</button><button class=ghost onclick="undo()">↶ Deshacer</button><button class=ghost onclick="openImportJSON()">📂 Cargar JSON</button></div></div>';return}
   let h=`<header><h1>🎓 Mi curso</h1><div class=row>
@@ -272,30 +289,65 @@ function vCirc(c){
 function tgC(id,cidv){if(!edit){toast('Activá edición');return}const c=C();const al=(c.alumnos||[]).find(x=>x.id===id);const cat=D.circuitos?D.circuitos[cidv]:null;const nombreCi=cat?cat.nro+' — '+cat.nombre:cidv;const hechos=(c.circuitosHechos&&c.circuitosHechos[id])?c.circuitosHechos[id]:[];const yaEsta=hechos.includes(cidv);if(!confirm('¿'+(yaEsta?'Desmarcar':'Marcar')+' "'+nombreCi+'" para '+al.nombre+'?'))return;pushH();c.circuitosHechos=c.circuitosHechos||{};c.circuitosHechos[id]=c.circuitosHechos[id]||[];const i=c.circuitosHechos[id].indexOf(cidv);if(i>=0)c.circuitosHechos[id].splice(i,1);else c.circuitosHechos[id].push(cidv);save();render()}
 function intercambiar25y26(){if(!edit){toast('Activá edición');return}if(!confirm('¿Intercambiar los circuitos 25 y 26 en TODOS los cursos?'))return;let cambiados=0;D.cursos.forEach(c=>{if(!c.circuitosHechos)return;Object.keys(c.circuitosHechos).forEach(alId=>{const arr=c.circuitosHechos[alId]||[];const tiene25=arr.includes('c25');const tiene26=arr.includes('c26');if(tiene25===tiene26)return;if(tiene25)c.circuitosHechos[alId]=arr.filter(x=>x!=='c25').concat('c26');else c.circuitosHechos[alId]=arr.filter(x=>x!=='c26').concat('c25');cambiados++})});if(!cambiados){toast('No había 25/26 para intercambiar');return}pushH();save();render();toast('Intercambiados 25↔26 en '+cambiados+' alumnos')}
 
-// Evaluaciones (con fecha por nota y fotocopias por tema)
+// Evaluaciones (con fecha por nota y un contador de fotocopias por tema)
 function celdaN(id,eid,notaObj,conFecha,edit2){
  const v=notaDe(notaObj)??'';
  const f=fechaDe(notaObj);
  const cls=gcls(notaObj);
  return `<div class=celdaNota>${conFecha?`<input class=fecha type=date value="${esc(f)}" ${edit2?'':'readonly'} onchange="setFecha('${id}','${eid}',this)">`:''}<input class="num ${cls}" value="${esc(v)}" ${edit2?'':'readonly'} onchange="setN('${id}','${eid}',this)"></div>`;
 }
-function fotCont(c,id,tema){return ((c.fotocopias||{})[id]||{})[tema]||0}
+function esCursoIAE(c){return !!c&&(c.id==='iae'||/\bIAE\b/i.test(String(c.nombre||''))||String(c.materia||'').trim().toLowerCase()==='instalaciones y aplicaciones de la energía')}
+function evalsCurso(c){return [...(c.evaluaciones||[]),...(c.materias||[]).flatMap(m=>m.evaluaciones||[])]}
+function normalizarFotocopias(c){
+ if(!esCursoIAE(c))return false;
+ let changed=false;
+ const evs=evalsCurso(c);
+ if(c.fotocopiasCols){delete c.fotocopiasCols;changed=true}
+ if(!c.fotocopias){c.fotocopias={};changed=true}
+ (c.alumnos||[]).forEach(s=>{
+  const f=c.fotocopias[s.id]=c.fotocopias[s.id]||{},notas=(c.notas||{})[s.id]||{};
+  evs.forEach(e=>{
+   if(Object.prototype.hasOwnProperty.call(f,e.id)){
+    const n=Number(f[e.id])||0;
+    if(n>0)f[e.tema]=(Number(f[e.tema])||0)+n;
+    delete f[e.id];changed=true;
+   }
+   const v=notaDe(notas[e.id]);
+   if(String(v||'').toUpperCase()==='X'){f[e.tema]=(Number(f[e.tema])||0)+1;delete notas[e.id];changed=true}
+  });
+ });
+ if(c.fotocopiasVersion!==2){c.fotocopiasVersion=2;changed=true}
+ return changed;
+}
+function fotNombre(tema){return 'Fotocopias · '+tema}
+function fotCont(c,id,tema){return Number(((c.fotocopias||{})[id]||{})[tema])||0}
+function fotCelda(c,id,tema){const n=fotCont(c,id,tema);return `<td class="grp"><span class="fot" data-tema="${esc(tema)}" onclick="fotSumar('${id}',this.dataset.tema,1)" oncontextmenu="fotSumar('${id}',this.dataset.tema,-1);return false" title="Clic: suma 1. Clic derecho: resta 1">${n||'X'}</span></td>`}
+function fotPayload(c,id,evals){const out={};if(!esCursoIAE(c))return out;[...new Set((evals||[]).map(e=>e.tema))].forEach(t=>{const n=fotCont(c,id,t);if(n>0)out[t]=n});return out}
+function fotHeader(tema){return `<th class=grp><div class=rot>${esc(fotNombre(tema))}</div></th>`}
+function evalColLabel(c,e){if(!esCursoIAE(c))return evLabel(c,e);if(e.tipo==='Evaluación'||e.tipo==='Original')return e.tema;if(e.tipo==='Recuperatorio')return 'Recuperatorio '+e.tema;if(e.tipo==='Recup. final')return 'Recuperatorio final '+e.tema;return evLabel(c,e)}
+function noEntregoLaminaCount(c,id,eid){return Number(((c.noEntregoLaminas||{})[id]||{})[eid])||0}
+function noEntregoLaminaCell(c,id,e){const n=noEntregoLaminaCount(c,id,e.id);return `<td class="grp"><span class="fot" data-eid="${esc(e.id)}" onclick="noEntregoLaminaSumar('${id}',this.dataset.eid,1)" oncontextmenu="noEntregoLaminaSumar('${id}',this.dataset.eid,-1);return false" title="Clic: suma 1. Clic derecho: resta 1">${n||'X'}</span></td>`}
+function noEntregoLaminaSumar(id,eid,delta){if(!edit){toast('Activá edición');return}pushH();const c=C();c.noEntregoLaminas=c.noEntregoLaminas||{};c.noEntregoLaminas[id]=c.noEntregoLaminas[id]||{};const actual=noEntregoLaminaCount(c,id,eid),nuevo=Math.max(0,actual+delta);if(nuevo===0)delete c.noEntregoLaminas[id][eid];else c.noEntregoLaminas[id][eid]=nuevo;save();render()}
+function laminaNotaLabel(e,n){return e.tema+(e.tipo?' · '+e.tipo:'')+' · Nota '+n}
 function vEval(c){
  const conFecha=true;
+ const usaFot=esCursoIAE(c);
  const mats=c.materias&&c.materias.length?c.materias:null;
  if(mats){
   const m=matSel(c);c._matSel=m.id;
   const sel=mats.map(x=>`<option value="${x.id}" ${x.id===m.id?'selected':''}>${esc(x.nombre)}</option>`).join('');
-  let h=`<div class=card><div class=row style="justify-content:space-between"><b>Evaluaciones</b><select onchange="C()._matSel=this.value;render()">${sel}</select></div></div>`;
+  let h=`<div class=card><div class=row style="justify-content:space-between"><b>Evaluaciones</b><select onchange="C()._matSel=this.value;render()">${sel}</select></div>${usaFot?'<div class=muted style="margin-top:6px">En modo edición, clic en “X” suma una fotocopia; clic derecho resta una.</div>':''}</div>`;
   const temas=temasDeMateria(m);
   if(temas.length){
+   const dosNotas=esLaminas3ro(c,m);
    h+='<div class="card wrap"><table><thead><tr><th>Alumno</th>';
-   temas.forEach(t=>{m.evaluaciones.filter(e=>e.tema===t).forEach(e=>h+=`<th><div class=rot>${esc(t)} · ${esc(e.tipo||'')}</div></th>`);h+=`<th class=grp><div class=rot>Mejor ${esc(t)}</div></th>`});
+   temas.forEach(t=>{const evs=m.evaluaciones.filter(e=>e.tema===t);if(dosNotas&&evs.length){const e=evs[0];h+=`<th class=grp><div class=rot>No entregó · ${esc(t)}</div></th><th><div class=rot>${esc(laminaNotaLabel(e,1))}</div></th><th><div class=rot>${esc(laminaNotaLabel(e,2))}</div></th>`}else{if(usaFot)h+=fotHeader(t);evs.forEach(e=>h+=`<th><div class=rot>${esc(t)} · ${esc(e.tipo||'')}</div></th>`)}h+=`<th class=grp><div class=rot>Mejor ${esc(t)}</div></th>`});
    h+='</tr></thead><tbody>';
    (c.alumnos||[]).forEach(s=>{
     h+=`<tr><td>${esc(s.nombre)}</td>`;
     temas.forEach(t=>{
-     m.evaluaciones.filter(e=>e.tema===t).forEach(e=>{h+=`<td>${celdaN(s.id,e.id,((c.notas||{})[s.id]||{})[e.id],conFecha,edit)}</td>`});
+     const evs=m.evaluaciones.filter(e=>e.tema===t);
+     if(dosNotas&&evs.length){const e=evs[0],notas=(c.notas||{})[s.id]||{};h+=noEntregoLaminaCell(c,s.id,e);h+=`<td>${celdaN(s.id,e.id,notas[e.id],conFecha,edit)}</td><td>${celdaN(s.id,segundaNotaLaminaId(e.id),notas[segundaNotaLaminaId(e.id)],conFecha,edit)}</td>`}else{if(usaFot)h+=fotCelda(c,s.id,t);evs.forEach(e=>h+=`<td>${celdaN(s.id,e.id,((c.notas||{})[s.id]||{})[e.id],conFecha,edit)}</td>`)}
      const mj=mejorTemaMateria(c,s.id,m,t);
      const clsM=mj==null?'aus':(parseNum(mj)>=APROB?'okk':'bad');
      h+=`<td class="grp"><b class="num ${clsM}" style="display:inline-block;min-width:32px;padding:3px 8px;border-radius:6px">${mj??'—'}</b></td>`;
@@ -323,23 +375,24 @@ function vEval(c){
  }
  if(!c.evaluaciones||!c.evaluaciones.length)return '<div class=card>Sin evaluaciones cargadas.'+(edit?'':' Activá ✏️ para agregarlas.')+'</div>'+evalForm();
  const temas=temasDe(c);
- let h=`<div class=card><b>Evaluaciones</b> <span class=muted>— nota y fecha por instancia. La “📄” cuenta las fotocopias que no trajo (no afecta la nota).</span></div>`;
+ let h=`<div class=card><b>Evaluaciones</b> <span class=muted>— nota y fecha por instancia.${usaFot?' En modo edición, clic en “X” suma una fotocopia; clic derecho resta una.':''}</span></div>`;
  h+='<div class="card wrap"><table><thead><tr><th>Alumno</th>';
  temas.forEach(t=>{
+  if(usaFot)h+=fotHeader(t);
   const evs=c.evaluaciones.filter(e=>e.tema===t);
-  evs.forEach(e=>h+=`<th><div class=rot>${esc(evLabel(c,e))}</div>${edit?`<a href="#" onclick="delEval('${e.id}');return false" title="Quitar" style="color:var(--no);text-decoration:none;font-size:10px">✕</a>`:''}</th>`);
-  h+=`<th class=grp><div class=rot>Mejor ${esc(t)}</div></th><th class=grp><div class=rot>📄 ${esc(t)}</div></th>`;
+  evs.forEach(e=>h+=`<th><div class=rot>${esc(evalColLabel(c,e))}</div>${edit?`<a href="#" onclick="delEval('${e.id}');return false" title="Quitar" style="color:var(--no);text-decoration:none;font-size:10px">✕</a>`:''}</th>`);
+  h+=`<th class=grp><div class=rot>Mejor ${esc(t)}</div></th>`;
  });
  h+='</tr></thead><tbody>';
  (c.alumnos||[]).forEach(s=>{
   h+=`<tr><td>${esc(s.nombre)}</td>`;
   temas.forEach(t=>{
+   if(usaFot)h+=fotCelda(c,s.id,t);
    const evs=c.evaluaciones.filter(e=>e.tema===t);
-   evs.forEach(e=>{h+=`<td>${celdaN(s.id,e.id,((c.notas||{})[s.id]||{})[e.id],conFecha,edit)}</td>`});
+   evs.forEach(e=>h+=`<td>${celdaN(s.id,e.id,((c.notas||{})[s.id]||{})[e.id],conFecha,edit)}</td>`);
    const m=mejorTema(c,s.id,t);
    const clsM=m==null?'aus':(parseNum(m)>=APROB?'okk':'bad');
    h+=`<td class="grp"><b class="num ${clsM}" style="display:inline-block;min-width:32px;padding:3px 8px;border-radius:6px">${m??'—'}</b></td>`;
-   h+=`<td class="grp"><span class="fot" onclick="fotSumar('${s.id}','${esc(t)}',1)" oncontextmenu="fotSumar('${s.id}','${esc(t)}',-1);return false" title="Clic: suma 1. Clic derecho: resta 1">📄 ${fotCont(c,s.id,t)}</span></td>`;
   });
   h+='</tr>';
  });
@@ -347,15 +400,15 @@ function vEval(c){
 }
 function evalForm(){return edit?`<div class=card><b>Agregar evaluación</b><div class=row style="margin-top:6px"><input id=evTema placeholder="Tema (ej: Canalizaciones)" style="flex:1;min-width:180px"><select id=evTipo><option value="Original">Evaluación</option><option value="Recuperatorio">Recuperatorio</option><option value="Recup. final">Recup. final</option></select><button onclick="addEval()">Agregar</button></div></div>`:''}
 function addEval(){if(!edit){toast('Activá edición');return}const tema=$('#evTema').value.trim();if(!tema){toast('Escribí el tema');return}pushH();const c=C();c.evaluaciones=c.evaluaciones||[];c.evaluaciones.push({id:'ev'+uid(),tema,tipo:$('#evTipo').value});save();render()}
-function delEval(id){if(!edit)return;const c=C(),e=(c.evaluaciones||[]).find(x=>x.id===id);if(!e||!confirm('¿Quitar la columna “'+evLabel(c,e)+'” y sus notas?'))return;pushH();c.evaluaciones=c.evaluaciones.filter(x=>x.id!==id);Object.keys(c.notas||{}).forEach(s=>delete c.notas[s][id]);save();render()}
-function setN(id,eid,el){if(!edit){toast('Activá edición');return}pushH();const c=C();c.notas=c.notas||{};c.notas[id]=c.notas[id]||{};const prev=c.notas[id][eid];const v=String(el.value).trim();el.value=v;
+function delEval(id){if(!edit)return;const c=C(),e=(c.evaluaciones||[]).find(x=>x.id===id);if(!e||!confirm('¿Quitar la columna “'+evLabel(c,e)+'” y sus notas?'))return;pushH();c.evaluaciones=c.evaluaciones.filter(x=>x.id!==id);Object.keys(c.notas||{}).forEach(s=>delete c.notas[s][id]);if(!c.evaluaciones.some(x=>x.tema===e.tema))Object.keys(c.fotocopias||{}).forEach(s=>delete c.fotocopias[s][e.tema]);save();render()}
+function setN(id,eid,el){if(!edit){toast('Activá edición');return}const v=String(el.value).trim(),cActual=C(),ev=evalsCurso(cActual).find(x=>x.id===eid);if(v.toUpperCase()==='X'&&esCursoIAE(cActual)&&ev){el.value='';fotSumar(id,ev.tema,1);return}pushH();const c=C();c.notas=c.notas||{};c.notas[id]=c.notas[id]||{};const prev=c.notas[id][eid];el.value=v;
  if(v===''){delete c.notas[id][eid]}
  else{const f=fechaDe(prev)||td();c.notas[id][eid]={v,f}}
  el.className='num '+gcls(c.notas[id][eid]);
  save();render()
 }
 function setFecha(id,eid,el){if(!edit){toast('Activá edición');return}pushH();const c=C();c.notas=c.notas||{};c.notas[id]=c.notas[id]||{};const prev=c.notas[id][eid];const f=el.value;if(!prev)return;if(prev&&typeof prev==='object')prev.f=f;else c.notas[id][eid]={v:prev,f};save();toast('Fecha guardada')}
-function fotSumar(id,tema,delta){if(!edit){toast('Activá edición');return}pushH();const c=C();c.fotocopias=c.fotocopias||{};c.fotocopias[id]=c.fotocopias[id]||{};const actual=c.fotocopias[id][tema]||0;const nuevo=Math.max(0,actual+delta);if(nuevo===0)delete c.fotocopias[id][tema];else c.fotocopias[id][tema]=nuevo;save();render()}
+function fotSumar(id,tema,delta){if(!edit){toast('Activá edición');return}pushH();const c=C();c.fotocopias=c.fotocopias||{};c.fotocopias[id]=c.fotocopias[id]||{};const actual=fotCont(c,id,tema),nuevo=Math.max(0,actual+delta);if(nuevo===0)delete c.fotocopias[id][tema];else c.fotocopias[id][tema]=nuevo;save();render()}
 function tgP(id,pid){if(!edit){toast('Activá edición');return}const c=C();const hechos=(c.practicasHechas||{})[id]||[];const ya=hechos.includes(pid);if(!confirm('¿'+(ya?'Desmarcar':'Marcar')+' la parte '+pid+'?'))return;pushH();c.practicasHechas=c.practicasHechas||{};c.practicasHechas[id]=ya?hechos.filter(x=>x!==pid):hechos.concat(pid);save();render()}
 
 // Cierres
@@ -402,7 +455,7 @@ function vAlum(c){
  if(edit)h+=`<div class=card style="border-color:var(--no)"><b style="color:var(--no)">Eliminar este curso</b><p class=muted>Borra el curso con sus alumnos, asistencia, notas, cierres y códigos.</p><button style="background:var(--no)" onclick="eliminarCurso()">🗑 Eliminar curso</button></div>`;
  return h;
 }
-function delAl(id){if(!edit){toast('Activá edición');return}const c=C();const al=(c.alumnos||[]).find(x=>x.id===id);if(!al)return;if(!confirm('¿Quitar a '+al.nombre+' de este curso?'))return;pushH();c.alumnos=(c.alumnos||[]).filter(x=>x.id!==id);if(c.circuitosHechos)delete c.circuitosHechos[id];if(c.notas)delete c.notas[id];if(c.cierres)delete c.cierres[id];if(c.practicasHechas)delete c.practicasHechas[id];if(c.obs)delete c.obs[id];if(c.fotocopias)delete c.fotocopias[id];Object.keys(c.asistencia||{}).forEach(f=>{if(c.asistencia[f])delete c.asistencia[f][id]});save();render();toast(al.nombre+' quitado')}
+function delAl(id){if(!edit){toast('Activá edición');return}const c=C();const al=(c.alumnos||[]).find(x=>x.id===id);if(!al)return;if(!confirm('¿Quitar a '+al.nombre+' de este curso?'))return;pushH();c.alumnos=(c.alumnos||[]).filter(x=>x.id!==id);if(c.circuitosHechos)delete c.circuitosHechos[id];if(c.notas)delete c.notas[id];if(c.cierres)delete c.cierres[id];if(c.practicasHechas)delete c.practicasHechas[id];if(c.obs)delete c.obs[id];if(c.fotocopias)delete c.fotocopias[id];if(c.noEntregoLaminas)delete c.noEntregoLaminas[id];Object.keys(c.asistencia||{}).forEach(f=>{if(c.asistencia[f])delete c.asistencia[f][id]});save();render();toast(al.nombre+' quitado')}
 function eliminarCurso(){if(!edit){toast('Activá edición');return}const c=C();if(!c)return;if(!confirm('¿Eliminar este curso con todos sus datos? Se puede deshacer con ↶.'))return;pushH();D.cursos.splice(cur,1);cur=Math.max(0,Math.min(cur,D.cursos.length-1));tab='asist';save();render();toast('Curso eliminado')}
 function agregarLista(){if(!edit){toast('Activá edición');return}const c=C(),nombres=listaDesdeTexto(document.getElementById('alLista').value);if(!nombres.length){toast('No hay nombres');return}const ya=new Set((c.alumnos||[]).map(a=>normNombre(a.nombre))),nuevos=nombres.filter(n=>!ya.has(normNombre(n)));if(!nuevos.length){toast('Todos ya estaban en el curso');return}pushH();c.alumnos=c.alumnos||[];nuevos.forEach(n=>c.alumnos.push({id:'a'+uid(),nombre:n,alta:td(),baja:null,codigo:randCode()}));c.alumnos.sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));save();render();toast(nuevos.length+' alumnos agregados')}
 function addAl(){const v=$('#nn').value.trim();if(!v)return;pushH();const c=C();c.alumnos=c.alumnos||[];c.alumnos.push({id:'a'+uid(),nombre:v,alta:td(),baja:null,codigo:randCode()});c.alumnos.sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));save();render();toast('Agregado')}
@@ -415,9 +468,11 @@ function vRep(c){
  h+='</div><div class=card><b>Por tema — alumnos que no aprobaron</b>';
  temas.forEach(t=>{const noAprob=(c.alumnos||[]).filter(s=>!temaAprobado(c,s.id,t));h+=`<div style="padding:5px 0;border-bottom:1px solid var(--bd)"><b>${esc(t)}</b> (${noAprob.length}): ${noAprob.length?noAprob.map(s=>`<span class="pill no">${esc(s.nombre)}</span>`).join(''):'<span class=chip ok>Todos aprobados</span>'}</div>`});
  h+='</div>';
- h+='<div class=card><b>Fotocopias no traídas por alumno</b>';
- (c.alumnos||[]).forEach(s=>{const f=c.fotocopias&&c.fotocopias[s.id]||{};const lista=Object.entries(f).filter(([t,n])=>n>0);if(lista.length)h+=`<div style="padding:5px 0;border-bottom:1px solid var(--bd)"><b>${esc(s.nombre)}</b>: ${lista.map(([t,n])=>`<span class="pill no">${esc(t)} · ${n}</span>`).join('')}</div>`});
- h+='</div>';
+ if(esCursoIAE(c)){
+  h+='<div class=card><b>Fotocopias no traídas por alumno</b>';
+  (c.alumnos||[]).forEach(s=>{const lista=Object.entries(fotPayload(c,s.id,evalsCurso(c)));if(lista.length)h+=`<div style="padding:5px 0;border-bottom:1px solid var(--bd)"><b>${esc(s.nombre)}</b>: ${lista.map(([t,n])=>`<span class="pill no">${esc(t)} · ${n}</span>`).join('')}</div>`});
+  h+='</div>';
+ }
  return h;
 }
 
@@ -569,14 +624,14 @@ async function pubSeal(k,o){const iv=crypto.getRandomValues(new Uint8Array(12)),
 function pubPayload(c,s){
  let p=0,a=0,t=0;const last=[];
  Object.keys(c.asistencia||{}).sort().forEach(d=>{const v=((c.asistencia||{})[d]||{})[s.id];if(v){v==='P'?p++:v==='A'?a++:t++;last.push([d,v])}});
- const fot={};(c.fotocopias&&c.fotocopias[s.id]||{});Object.entries(c.fotocopias&&c.fotocopias[s.id]||{}).forEach(([tema,n])=>{if(n>0)fot[tema]=n});
+ const fot=fotPayload(c,s.id,c.evaluaciones||[]);
  let materias;
  if(c.materias&&c.materias.length){
   materias=c.materias.map(m=>{
-   const notas=m.evaluaciones.map(e=>[e.tema+(e.tipo?' · '+e.tipo:''),notaDe(((c.notas||{})[s.id]||{})[e.id])]).filter(x=>x[1]!==undefined&&x[1]!==''&&x[1]!==null);
+  const notas=[];m.evaluaciones.forEach(e=>{if(esLaminas3ro(c,m)){notasMateriaEval(c,s.id,m,e).forEach((v,i)=>{const n=notaDe(v);if(n!==undefined&&n!==''&&n!==null)notas.push([laminaNotaLabel(e,i+1),n])})}else{const n=notaDe(((c.notas||{})[s.id]||{})[e.id]);if(n!==undefined&&n!==''&&n!==null)notas.push([e.tema+(e.tipo?' · '+e.tipo:''),n])}});
    const prac=(m.practicas||[]).map(pr=>{const hechos=(c.practicasHechas||{})[s.id]||[];const partes=[...Array(pr.partes)].map((_,i)=>hechos.includes(pr.id+'_'+(i+1)));return {nombre:pr.nombre,partes,total:pr.partes}});
    const cie={};(m.cierres||[]).forEach(k=>{const v=(c.cierres||{})[s.id]?.[m.id+'_'+k];if(v!=null&&v!=='')cie[k]=v});
-   return {id:m.id,nombre:m.nombre,notas,practicas:prac,cierres:cie,rec:temasPendMateria(c,s.id,m),fot};
+   return {id:m.id,nombre:m.nombre,notas,practicas:prac,cierres:cie,rec:temasPendMateria(c,s.id,m),fot:fotPayload(c,s.id,m.evaluaciones||[])};
   });
  }else{
   const gr=(c.evaluaciones||[]).map(e=>[evLabel(c,e),notaDe(((c.notas||{})[s.id]||{})[e.id])]).filter(x=>x[1]!==undefined&&x[1]!=='');
