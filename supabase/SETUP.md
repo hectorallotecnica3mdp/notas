@@ -21,6 +21,12 @@ Los docentes pueden autenticarse con Google, pero no reciben cursos hasta que un
 
 Antes de habilitar datos reales, probá con cuentas separadas: una cuenta sin asignación no debe ver cursos; una cuenta **Solo lectura** debe poder ver pero no guardar; una cuenta **Puede editar** debe poder guardar; y solo el administrador debe poder asignar accesos, importar o eliminar cursos.
 
+## Instalar Mi curso como aplicación
+
+La página `mi-curso.html` se puede instalar desde un navegador compatible cuando se sirve por HTTPS. En Android/Chrome, abrí el menú del navegador y elegí **Instalar aplicación** o **Agregar a pantalla principal**. En iPhone/iPad, abrila en Safari, tocá **Compartir** y luego **Agregar a pantalla de inicio**. En una computadora, Chrome o Edge ofrece **Instalar Mi curso** desde el menú o el ícono de instalación de la barra de direcciones.
+
+La PWA conserva la misma interfaz y abre en una ventana independiente. Guarda en caché solo la carcasa de la aplicación para poder abrirla; iniciar sesión y sincronizar cursos requiere conexión a Internet. Los JSON de alumnos no se guardan en la caché offline.
+
 ## Migración
 
 - Antes de importar, descarga una copia JSON desde la aplicación actual y guárdala en un lugar privado.
