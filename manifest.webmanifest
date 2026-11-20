@@ -1,0 +1,28 @@
+{
+  "id": "./mi-curso.html",
+  "name": "Mi curso",
+  "short_name": "Mi curso",
+  "description": "Asistencia, evaluaciones y seguimiento de cursos.",
+  "lang": "es-AR",
+  "start_url": "./mi-curso.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f7f9",
+  "theme_color": "#2a62d9",
+  "orientation": "any",
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "./icons/mi-curso-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/mi-curso-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
