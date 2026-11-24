@@ -158,9 +158,27 @@ function temaAprobadoMateria(c,id,m,tema){
 }
 function temasPendMateria(c,id,m){return temasDeMateria(m).filter(t=>!temaAprobadoMateria(c,id,m,t))}
 
+const cierreCuartoPeriodoCurso=c=>{
+ if(!c)return false;
+ if(['meaA','meaB','iae'].includes(c.id))return true;
+ return /^4\s*°\s*(5|9)\s*°/i.test(String(c.nombre||'').replace(/\s+/g,''));
+}
+const cierreColsCuartoPeriodo=['1er','2do','3ro','4to','nota','DIC','FEB'];
+const cierreFinalCuartoPeriodo=cc=>{
+ const v=cc&&cc['4to'];
+ if(v==null||v==='')return{prom:null,estado:'Sin datos'};
+ const n=parseNum(v);
+ if(n!=null)return{prom:Math.round(n*10)/10,estado:n<APROB?'A recuperar':'Aprobado'};
+ const u=String(v).toUpperCase();
+ if(u==='TEA')return{prom:null,estado:'Aprobado'};
+ if(u==='TEP'||u==='TED')return{prom:null,estado:'A recuperar'};
+ return{prom:null,estado:'Sin datos'};
+}
+
 function cierreFinal(c,id){
  try{
   const cc=(c&&c.cierres&&c.cierres[id])||{};
+  if(cierreCuartoPeriodoCurso(c))return cierreFinalCuartoPeriodo(cc);
   const nums=[];let bajo=false,tep=false,tea=false;
   ['1er','2do','3ro','4to'].forEach(k=>{const v=cc[k];if(v==null||v==='')return;const n=parseNum(v);if(n!=null){nums.push(n);if(n<APROB)bajo=true}else{const u=String(v).toUpperCase();if(u==='TEA')tea=true;if(u==='TEP')tep=true}});
   const prom=nums.length?nums.reduce((a,b)=>a+b,0)/nums.length:null;
@@ -175,6 +193,7 @@ function cierreFinal(c,id){
 function cierreFinalMateria(c,id,m){
  try{
   const cc=(c.cierres||{})[id]||{};
+  if(cierreCuartoPeriodoCurso(c))return cierreFinalCuartoPeriodo({'4to':cc[m.id+'_4to']});
   const nums=[];let bajo=false,tep=false,tea=false;
   ['1er','2do','3ro','4to'].forEach(k=>{const v=cc[m.id+'_'+k];if(v==null||v==='')return;const n=parseNum(v);if(n!=null){nums.push(n);if(n<APROB)bajo=true}else{const u=String(v).toUpperCase();if(u==='TEA')tea=true;if(u==='TEP')tep=true}});
   const prom=nums.length?nums.reduce((a,b)=>a+b,0)/nums.length:null;
@@ -534,7 +553,7 @@ function vCie(c){
   });
   h+='</tbody></table></div>';return h;
  }
- const cols=(Array.isArray(c.cierreCols)&&c.cierreCols.length)?c.cierreCols:['1er','2do','3ro'];
+ const cols=cierreCuartoPeriodoCurso(c)?cierreColsCuartoPeriodo:(Array.isArray(c.cierreCols)&&c.cierreCols.length)?c.cierreCols:['1er','2do','3ro'];
  c.cierres=c.cierres||{};
  let h=`<div class=card><b>Cierres</b> <span class=muted>— se aprueba con promedio ≥ ${APROB} y sin nada en contra.</span></div>`;
  h+='<div class="card wrap"><table><thead><tr><th>Alumno</th>';
